@@ -1,0 +1,63 @@
+import { NavLink } from "react-router-dom";
+import { useAuth } from "../context/AuthContext";
+
+const LIENS_PAR_ROLE = {
+  EMPLOYE: [
+    { to: "/employe", label: "Tableau de bord" },
+    { to: "/employe/nouvelle-demande", label: "Nouvelle demande" },
+    { to: "/employe/historique", label: "Historique" },
+  ],
+  CHEF_SERVICE: [
+    { to: "/chef", label: "Tableau de bord" },
+    { to: "/chef/demandes", label: "Demandes à valider" },
+    { to: "/chef/calendrier", label: "Planning équipe" },
+  ],
+  ADMIN_RH: [
+    { to: "/admin", label: "Vue globale des soldes" },
+    { to: "/admin/types-conge", label: "Types de congés" },
+    { to: "/admin/structure", label: "Structure administrative" },
+    { to: "/admin/rapports", label: "Rapports statistiques" },
+  ],
+};
+
+export default function Sidebar() {
+  const { user, logout } = useAuth();
+  const liens = LIENS_PAR_ROLE[user?.role] ?? [];
+
+  return (
+    <aside className="w-64 shrink-0 border-r border-black/10 bg-white flex flex-col justify-between min-h-screen">
+      <div>
+        <div className="px-6 py-6 border-b border-black/10">
+          <p className="text-2xl font-black tracking-tight">Ijaza</p>
+          <p className="text-xs text-neutral-500 mt-1">{user?.nomComplet}</p>
+        </div>
+        <nav className="p-3">
+          {liens.map((lien) => (
+            <NavLink
+              key={lien.to}
+              to={lien.to}
+              end
+              className={({ isActive }) =>
+                `block rounded-xl px-4 py-3 mb-1 text-sm font-medium transition-colors ${
+                  isActive
+                    ? "bg-[#E91E8C] text-white"
+                    : "text-neutral-700 hover:bg-neutral-100"
+                }`
+              }
+            >
+              {lien.label}
+            </NavLink>
+          ))}
+        </nav>
+      </div>
+      <div className="p-3 border-t border-black/10">
+        <button
+          onClick={logout}
+          className="w-full rounded-xl px-4 py-3 text-sm font-medium text-neutral-700 hover:bg-neutral-100 text-left"
+        >
+          Déconnexion
+        </button>
+      </div>
+    </aside>
+  );
+}

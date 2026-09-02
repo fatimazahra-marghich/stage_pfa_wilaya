@@ -14,6 +14,7 @@ import GlobalBalances from "./pages/admin/GlobalBalances";
 import TypeCongePage from "./pages/admin/TypeConge";
 import Structure from "./pages/admin/Structure";
 import Reports from "./pages/admin/Reports";
+import RhPendingRequests from "./pages/admin/RhPendingRequests"; // <-- Import de la page de validation RH
 
 export default function App() {
   return (
@@ -100,6 +101,14 @@ export default function App() {
             }
           />
           <Route
+            path="/admin/validation"
+            element={
+              <ProtectedRoute rolesAutorises={["ADMIN_RH"]}>
+                <RhPendingRequests />
+              </ProtectedRoute>
+            }
+          />
+          <Route
             path="/admin/types-conge"
             element={
               <ProtectedRoute rolesAutorises={["ADMIN_RH"]}>
@@ -125,6 +134,7 @@ export default function App() {
           />
 
           <Route path="/" element={<Navigate to="/login" replace />} />
+          <Route path="*" element={<Navigate to="/login" replace />} />
         </Routes>
       </BrowserRouter>
     </AuthProvider>

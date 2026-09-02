@@ -41,6 +41,7 @@ INSTALLED_APPS = [
     # Third party apps
     'corsheaders',
     'rest_framework',
+    'rest_framework_simplejwt',
     
 
     # Vos applications (CRUCIAL : 'users' doit être bien présent ici !)
@@ -144,3 +145,14 @@ MAILERS = {
 }
 AUTH_USER_MODEL = 'users.Utilisateur'
 CORS_ALLOW_ALL_ORIGINS = True
+
+
+# Configuration de Django Rest Framework & JWT
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': (
+        'rest_framework_simplejwt.authentication.JWTAuthentication',
+    ),
+    'DEFAULT_PERMISSION_CLASSES': (
+        'rest_framework.permissions.IsAuthenticated',
+    ),
+}

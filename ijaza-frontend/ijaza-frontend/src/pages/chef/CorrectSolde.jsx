@@ -13,7 +13,7 @@ export default function CorrectSolde() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    api.get("/soldes/").then(({ data }) => setSoldes(data.results ?? data));
+    api.get("/conges/soldes/").then(({ data }) => setSoldes(data.results ?? data));
   }, []);
 
   const soldeSelectionne = soldes.find((s) => String(s.id) === String(soldeId));
@@ -27,14 +27,15 @@ export default function CorrectSolde() {
     }
     setEnvoi(true);
     try {
-      await api.post("/corrections-solde/", {
+      await api.post("/conges/corrections-solde/", {
         solde_conge: soldeId,
         nouveau_solde: parseFloat(nouveauSolde),
         motif,
       });
       navigate(-1);
-    } catch {
-      setErreur("La correction a échoué. Vérifie les informations.");
+    } catch (err) {
+      console.error(err);
+      setErreur("La correction a échoué. Vérifiez les informations.");
     } finally {
       setEnvoi(false);
     }
@@ -60,7 +61,7 @@ export default function CorrectSolde() {
               <option value="">Sélectionnez un agent</option>
               {soldes.map((s) => (
                 <option key={s.id} value={s.id}>
-                  {s.fonctionnaire_nom ?? `Fonctionnaire #${s.fonctionnaire}`} — {s.annee}
+                  {s.utilisateur_nom ?? `Agent #${s.utilisateur}`} — {s.annee}
                 </option>
               ))}
             </select>
@@ -103,7 +104,7 @@ export default function CorrectSolde() {
           <button
             type="submit"
             disabled={envoi}
-            className="w-full rounded-xl bg-[#E91E8C] text-white font-semibold py-3 hover:bg-[#c81879] disabled:opacity-50"
+            className="w-full rounded-xl bg-[#E91E8C] text-white font-semibold py-3 hover:bg-[#c81879] disabled:opacity-50 transition-colors"
           >
             {envoi ? "Enregistrement..." : "Enregistrer la correction"}
           </button>

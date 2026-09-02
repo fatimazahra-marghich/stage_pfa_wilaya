@@ -6,11 +6,11 @@ from .views import (
 )
 
 router = DefaultRouter()
-router.register(r'types-conge', TypeCongeViewSet)
-router.register(r'soldes', SoldeCongeViewSet)
-router.register(r'jours-feries', JourFerieViewSet)
-router.register(r'demandes', DemandeCongeViewSet)
-router.register(r'etapes-validation', EtapeValidationViewSet)
+router.register(r'types-conge', TypeCongeViewSet, basename='typeconge')
+router.register(r'soldes', SoldeCongeViewSet, basename='soldeconge')
+router.register(r'jours-feries', JourFerieViewSet, basename='jourferie')
+router.register(r'demandes', DemandeCongeViewSet, basename='demandeconge')
+router.register(r'etapes-validation', EtapeValidationViewSet, basename='etapevalidation')
 
 urlpatterns = [
     path('', include(router.urls)),

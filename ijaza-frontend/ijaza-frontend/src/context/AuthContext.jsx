@@ -9,18 +9,29 @@ export function AuthProvider({ children }) {
     return stored ? JSON.parse(stored) : null;
   });
 
-  async function login(matricule, password) {
-    const { data } = await api.post("/auth/login/", { matricule, password });
+  // Remplace matricule par email dans les paramètres
+  async function login(email, password) {
+    const { data } = await api.post("/users/auth/login/", { email, password });
+    
     localStorage.setItem("ijaza_access_token", data.access);
     localStorage.setItem("ijaza_refresh_token", data.refresh);
-    const userInfo = { role: data.role, nomComplet: data.nom_complet, matricule: data.matricule };
+    
+    const userInfo = { 
+      role: data.role, 
+      nomComplet: data.nom_complet, 
+      email: data.email,
+      matricule: data.matricule 
+    };
+    
     localStorage.setItem("ijaza_user", JSON.stringify(userInfo));
     setUser(userInfo);
     return userInfo;
   }
 
   function logout() {
-    localStorage.clear();
+    localStorage.removeItem("ijaza_access_token");
+    localStorage.removeItem("ijaza_refresh_token");
+    localStorage.removeItem("ijaza_user");
     setUser(null);
   }
 

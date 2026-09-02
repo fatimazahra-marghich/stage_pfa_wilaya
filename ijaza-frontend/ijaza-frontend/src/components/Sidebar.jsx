@@ -7,13 +7,15 @@ const LIENS_PAR_ROLE = {
     { to: "/employe/nouvelle-demande", label: "Nouvelle demande" },
     { to: "/employe/historique", label: "Historique" },
   ],
-  CHEF_SERVICE: [
-    { to: "/chef", label: "Tableau de bord" },
-    { to: "/chef/demandes", label: "Demandes à valider" },
-    { to: "/chef/calendrier", label: "Planning équipe" },
-  ],
+CHEF_SERVICE: [
+  { to: "/chef", label: "Tableau de bord" },
+  { to: "/chef/demandes", label: "Demandes à valider" },
+  { to: "/chef/calendrier", label: "Planning équipe" },
+  { to: "/chef/corriger-solde", label: "Régularisation solde" }, 
+],
   ADMIN_RH: [
     { to: "/admin", label: "Vue globale des soldes" },
+    { to: "/admin/validation", label: "Validation des demandes" },
     { to: "/admin/types-conge", label: "Types de congés" },
     { to: "/admin/structure", label: "Structure administrative" },
     { to: "/admin/rapports", label: "Rapports statistiques" },

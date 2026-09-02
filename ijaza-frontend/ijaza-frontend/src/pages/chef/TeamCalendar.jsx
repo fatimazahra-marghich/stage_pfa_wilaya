@@ -13,7 +13,7 @@ export default function TeamCalendar() {
   const [curseur, setCurseur] = useState(new Date());
 
   useEffect(() => {
-    api.get("/demandes/").then(({ data }) => setDemandes(data.results ?? data));
+    api.get("/conges/demandes/").then(({ data }) => setDemandes(data.results ?? data));
   }, []);
 
   const annee = curseur.getFullYear();
@@ -26,10 +26,14 @@ export default function TeamCalendar() {
     demandes
       .filter((d) => d.statut === "VALIDEE")
       .forEach((d) => {
-        if (!parAgent[d.fonctionnaire]) {
-          parAgent[d.fonctionnaire] = { nom: d.fonctionnaire_nom, periodes: [] };
+        const key = d.utilisateur;
+        if (!parAgent[key]) {
+          parAgent[key] = {
+            nom: d.utilisateur_nom || `Agent #${d.utilisateur}`,
+            periodes: [],
+          };
         }
-        parAgent[d.fonctionnaire].periodes.push({
+        parAgent[key].periodes.push({
           debut: new Date(d.date_debut),
           fin: new Date(d.date_fin),
         });
@@ -56,13 +60,13 @@ export default function TeamCalendar() {
         <div className="flex gap-2">
           <button
             onClick={() => changerMois(-1)}
-            className="w-10 h-10 rounded-xl border border-black flex items-center justify-center hover:bg-neutral-50"
+            className="w-10 h-10 rounded-xl border border-black flex items-center justify-center hover:bg-neutral-50 transition-colors"
           >
             ‹
           </button>
           <button
             onClick={() => changerMois(1)}
-            className="w-10 h-10 rounded-xl border border-black flex items-center justify-center hover:bg-neutral-50"
+            className="w-10 h-10 rounded-xl border border-black flex items-center justify-center hover:bg-neutral-50 transition-colors"
           >
             ›
           </button>

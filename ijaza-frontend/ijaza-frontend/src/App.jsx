@@ -75,6 +75,22 @@ export default function App() {
             }
           />
           <Route
+            path="/chef/nouvelle-demande"
+            element={
+              <ProtectedRoute rolesAutorises={["CHEF_SERVICE"]}>
+                <NewRequest />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/chef/historique"
+            element={
+              <ProtectedRoute rolesAutorises={["CHEF_SERVICE"]}>
+                <History />
+              </ProtectedRoute>
+            }
+          />
+          <Route
             path="/chef/calendrier"
             element={
               <ProtectedRoute rolesAutorises={["CHEF_SERVICE"]}>

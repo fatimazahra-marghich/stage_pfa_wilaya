@@ -10,6 +10,8 @@ const LIENS_PAR_ROLE = {
 CHEF_SERVICE: [
   { to: "/chef", label: "Tableau de bord" },
   { to: "/chef/demandes", label: "Demandes à valider" },
+  { to: "/chef/nouvelle-demande", label: "Nouvelle demande (Mes congés)" }, 
+  { to: "/chef/historique", label: "Mes demandes" },
   { to: "/chef/calendrier", label: "Planning équipe" },
   { to: "/chef/corriger-solde", label: "Régularisation solde" }, 
 ],

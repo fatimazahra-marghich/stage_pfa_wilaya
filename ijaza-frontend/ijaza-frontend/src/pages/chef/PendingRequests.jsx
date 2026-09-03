@@ -14,7 +14,10 @@ export default function PendingRequests() {
       const liste = data.results ?? data;
       // Filtrer les demandes en attente de validation
       const enAttente = liste.filter(
-        (d) => d.statut === "EN_ATTENTE_CHEF" || d.statut === "EN_ATTENTE_NIVEAU1"
+        (d) => 
+          d.statut === "EN_ATTENTE_CHEF" || 
+          d.statut === "EN_ATTENTE_NIVEAU1" || 
+          d.statut === "EN_ATTENTE"
       );
       setDemandes(enAttente);
     } catch (err) {
@@ -30,26 +33,22 @@ export default function PendingRequests() {
 
   async function traiter(id, decision) {
     let commentaire = "";
-    if (decision === "REFUSEE" || decision === "REFUSE") {
+    
+    // Demande de commentaire si refus
+    if (decision === "REFUSE") {
       commentaire = window.prompt("Motif du refus (obligatoire) :") ?? "";
       if (!commentaire.trim()) return;
     }
 
-    const statutFinal = decision.startsWith("REFUS") ? "REFUSEE" : "VALIDEE";
-
     try {
-      // 1. Enregistrer l'étape de validation dans Django
-      await api.post("/conges/etapes-validation/", {
-        demande: id,
-        statut: statutFinal,
-        commentaire: commentaire,
-      });
+      // Utilisation directe des actions personnalisées créées dans Django ViewSet (@action)
+      const endpoint = decision === "REFUSE" 
+        ? `/conges/demandes/${id}/refuser/` 
+        : `/conges/demandes/${id}/valider/`;
 
-      // 2. Mettre à jour le statut de la demande
-      await api.patch(`/conges/demandes/${id}/`, {
-        statut: statutFinal,
-      });
+      await api.post(endpoint, { commentaire });
 
+      // Recharge la liste des demandes après validation/refus
       charger();
     } catch (err) {
       console.error("Erreur lors de la validation :", err);
@@ -76,14 +75,16 @@ export default function PendingRequests() {
             >
               <Link to={`/chef/demandes/${d.id}`} className="flex items-center gap-4">
                 <div className="w-12 h-12 rounded-full bg-neutral-200 flex items-center justify-center font-bold text-neutral-600">
-                  {d.utilisateur_nom ? d.utilisateur_nom[0] : "E"}
+                  {d.utilisateur_details?.nom ? d.utilisateur_details.nom[0] : "E"}
                 </div>
                 <div>
-                  <p className="font-semibold hover:text-[#E91E8C]">
-                    {d.utilisateur_nom || `Employé #${d.utilisateur}`}
-                  </p>
-                  <p className="text-sm text-neutral-500">{d.type_conge_libelle}</p>
-                </div>
+                 <p className="font-semibold hover:text-[#E91E8C]">
+                        {d.utilisateur_details
+                       ? `${d.utilisateur_details.first_name || d.utilisateur_details.prenom || ''} ${d.utilisateur_details.last_name || d.utilisateur_details.nom || ''}`.trim() || `Employé #${d.utilisateur}`
+                       : d.utilisateur_nom || `Employé #${d.utilisateur}`}
+                 </p>
+                 <p className="text-sm text-neutral-500">{d.type_conge_libelle}</p>
+               </div>
               </Link>
 
               <div className="text-sm text-neutral-600">
@@ -95,13 +96,13 @@ export default function PendingRequests() {
 
               <div className="flex gap-2">
                 <button
-                  onClick={() => traiter(d.id, "REFUSEE")}
+                  onClick={() => traiter(d.id, "REFUSE")}
                   className="rounded-xl border border-black px-5 py-2 text-sm font-semibold hover:bg-neutral-50"
                 >
                   Refuser
                 </button>
                 <button
-                  onClick={() => traiter(d.id, "VALIDEE")}
+                  onClick={() => traiter(d.id, "VALIDE")}
                   className="rounded-xl bg-[#E91E8C] text-white px-5 py-2 text-sm font-semibold hover:bg-[#c81879]"
                 >
                   Valider

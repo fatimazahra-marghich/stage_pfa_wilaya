@@ -10,11 +10,18 @@ class TypeCongeSerializer(serializers.ModelSerializer):
 
 
 class SoldeCongeSerializer(serializers.ModelSerializer):
-    solde_actuel = serializers.ReadOnlyField()
+    # Rendu modifiable pour permettre l'ajustement/régularisation par les RH
+    solde_actuel = serializers.FloatField(required=False)
 
     class Meta:
         model = SoldeConge
         fields = ['id', 'utilisateur', 'annee', 'droits_acquis', 'jours_reportes', 'jours_consommes', 'solde_actuel']
+
+    def update(self, instance, validated_data):
+        # Permet de mettre à jour directement le solde lors d'un PATCH
+        instance.solde_actuel = validated_data.get('solde_actuel', instance.solde_actuel)
+        instance.save()
+        return instance
 
 
 class JourFerieSerializer(serializers.ModelSerializer):
@@ -24,13 +31,12 @@ class JourFerieSerializer(serializers.ModelSerializer):
 
 
 class EtapeValidationSerializer(serializers.ModelSerializer):
-    # Support des deux orthographes selon ton modèle (valideur ou validateur)
     validateur_nom = serializers.SerializerMethodField()
 
     class Meta:
         model = EtapeValidation
         fields = '__all__'
-        read_only_fields = ['valideur', 'validateur', 'date_action']  # <-- IMPORTANT pour éviter l'erreur 400
+        read_only_fields = ['valideur', 'validateur', 'date_action']
 
     def get_validateur_nom(self, obj):
         user = getattr(obj, 'valideur', None) or getattr(obj, 'validateur', None)
@@ -52,13 +58,10 @@ class DemandeCongeSerializer(serializers.ModelSerializer):
         read_only_fields = ['utilisateur', 'statut', 'created_at']
 
     def validate(self, data):
-        # RÈGLE CONFORME AU CAHIER DES CHARGES :
-        # La pièce jointe (certificat médical) est obligatoire UNIQUEMENT si le type exige un justificatif
         type_conge = data.get('type_conge')
         piece_jointe = data.get('piece_jointe')
 
         if type_conge:
-            # Vérifie si le type est de la maladie ou si le boolean justificatif_requis est à True
             libelle = getattr(type_conge, 'libelle', '').lower()
             exige_justificatif = getattr(type_conge, 'justificatif_requis', False) or 'maladie' in libelle
 

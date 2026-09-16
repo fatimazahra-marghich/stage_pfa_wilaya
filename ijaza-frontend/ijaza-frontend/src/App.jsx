@@ -10,11 +10,18 @@ import PendingRequests from "./pages/chef/PendingRequests";
 import RequestDetail from "./pages/chef/RequestDetail";
 import TeamCalendar from "./pages/chef/TeamCalendar";
 import CorrectSolde from "./pages/chef/CorrectSolde";
-import GlobalBalances from "./pages/admin/GlobalBalances";
+
+// Pages Espace RH
+import GlobalBalances from "./pages/rh/GlobalBalances";
+import RhPendingRequests from "./pages/rh/RhPendingRequests";
+import PlanningPage from "./pages/rh/PlanningPage";
+import Reports from "./pages/rh/Reports";
+
+// Pages Espace ADMIN
+import EmployesPage from "./pages/admin/EmployesPage";
+import StructureAdminPage from "./pages/admin/StructureAdminPage";
+import JourFeriePage from "./pages/admin/JourFeriePage";
 import TypeCongePage from "./pages/admin/TypeConge";
-import Structure from "./pages/admin/Structure";
-import Reports from "./pages/admin/Reports";
-import RhPendingRequests from "./pages/admin/RhPendingRequests"; // <-- Import de la page de validation RH
 
 export default function App() {
   return (
@@ -27,7 +34,7 @@ export default function App() {
           <Route
             path="/employe"
             element={
-              <ProtectedRoute rolesAutorises={["EMPLOYE", "CHEF_SERVICE", "ADMIN_RH"]}>
+              <ProtectedRoute rolesAutorises={["EMPLOYE", "CHEF_SERVICE", "RH", "ADMIN_RH"]}>
                 <DashboardEmploye />
               </ProtectedRoute>
             }
@@ -35,7 +42,7 @@ export default function App() {
           <Route
             path="/employe/nouvelle-demande"
             element={
-              <ProtectedRoute rolesAutorises={["EMPLOYE", "CHEF_SERVICE", "ADMIN_RH"]}>
+              <ProtectedRoute rolesAutorises={["EMPLOYE", "CHEF_SERVICE", "RH", "ADMIN_RH"]}>
                 <NewRequest />
               </ProtectedRoute>
             }
@@ -43,7 +50,7 @@ export default function App() {
           <Route
             path="/employe/historique"
             element={
-              <ProtectedRoute rolesAutorises={["EMPLOYE", "CHEF_SERVICE", "ADMIN_RH"]}>
+              <ProtectedRoute rolesAutorises={["EMPLOYE", "CHEF_SERVICE", "RH", "ADMIN_RH"]}>
                 <History />
               </ProtectedRoute>
             }
@@ -107,44 +114,90 @@ export default function App() {
             }
           />
 
-          {/* Espace Admin RH */}
+          {/* 🏢 Espace RH */}
           <Route
-            path="/admin"
+            path="/rh"
             element={
-              <ProtectedRoute rolesAutorises={["ADMIN_RH"]}>
+              <ProtectedRoute rolesAutorises={["RH", "ADMIN_RH"]}>
                 <GlobalBalances />
               </ProtectedRoute>
             }
           />
           <Route
-            path="/admin/validation"
+            path="/rh/validation"
             element={
-              <ProtectedRoute rolesAutorises={["ADMIN_RH"]}>
+              <ProtectedRoute rolesAutorises={["RH", "ADMIN_RH"]}>
                 <RhPendingRequests />
               </ProtectedRoute>
             }
           />
           <Route
-            path="/admin/types-conge"
+            path="/rh/nouvelle-demande"
             element={
-              <ProtectedRoute rolesAutorises={["ADMIN_RH"]}>
-                <TypeCongePage />
+              <ProtectedRoute rolesAutorises={["RH", "ADMIN_RH"]}>
+                <NewRequest />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/rh/historique"
+            element={
+              <ProtectedRoute rolesAutorises={["RH", "ADMIN_RH"]}>
+                <History />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/rh/planning"
+            element={
+              <ProtectedRoute rolesAutorises={["RH", "ADMIN_RH"]}>
+                <PlanningPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/rh/rapports"
+            element={
+              <ProtectedRoute rolesAutorises={["RH", "ADMIN_RH"]}>
+                <Reports />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* ⚙️ Espace ADMIN */}
+          <Route
+            path="/admin"
+            element={<Navigate to="/admin/employes" replace />}
+          />
+          <Route
+            path="/admin/employes"
+            element={
+              <ProtectedRoute rolesAutorises={["ADMIN"]}>
+                <EmployesPage />
               </ProtectedRoute>
             }
           />
           <Route
             path="/admin/structure"
             element={
-              <ProtectedRoute rolesAutorises={["ADMIN_RH"]}>
-                <Structure />
+              <ProtectedRoute rolesAutorises={["ADMIN"]}>
+                <StructureAdminPage />
               </ProtectedRoute>
             }
           />
           <Route
-            path="/admin/rapports"
+            path="/admin/jours-feries"
             element={
-              <ProtectedRoute rolesAutorises={["ADMIN_RH"]}>
-                <Reports />
+              <ProtectedRoute rolesAutorises={["ADMIN"]}>
+                <JourFeriePage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin/types-conge"
+            element={
+              <ProtectedRoute rolesAutorises={["ADMIN"]}>
+                <TypeCongePage />
               </ProtectedRoute>
             }
           />

@@ -6,7 +6,8 @@ class Utilisateur(AbstractUser):
     ROLE_CHOICES = (
         ('EMPLOYE', 'Employé'),
         ('CHEF_SERVICE', 'Chef de Service'),
-        ('ADMIN_RH', 'Administrateur RH'),
+        ('RH', 'Ressources Humaines'),        # ✅ Gestion opérationnelle (Congés, Soldes)
+        ('ADMIN', 'Administrateur Système'), # ✅ Gestion de la structure, types & personnel
     )
 
     matricule = models.CharField(max_length=50, unique=True)
@@ -21,5 +22,3 @@ class Utilisateur(AbstractUser):
     @property
     def nom_complet(self):
         return f"{self.first_name} {self.last_name}".strip() or self.username
-
-# Create your models here.

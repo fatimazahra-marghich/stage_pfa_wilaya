@@ -1,33 +1,50 @@
 from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
+from datetime import datetime
+import traceback
+
+from .permissions import IsAdminUserRole, IsRHUserRole
 from .models import TypeConge, SoldeConge, JourFerie, DemandeConge, EtapeValidation
 from .serializers import (
     TypeCongeSerializer, SoldeCongeSerializer, 
     JourFerieSerializer, DemandeCongeSerializer, EtapeValidationSerializer
 )
+from .utils import calculer_jours_ouvrables
 
 
+# ⚙️ RESERVÉ A L'ADMIN (Gestion des types de congés)
 class TypeCongeViewSet(viewsets.ModelViewSet):
     queryset = TypeConge.objects.all()
     serializer_class = TypeCongeSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsAdminUserRole]
 
 
+# 🏢 RESERVÉ AU RH & ADMIN (Consultation et ajustement des soldes)
 class SoldeCongeViewSet(viewsets.ModelViewSet):
     serializer_class = SoldeCongeSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        return SoldeConge.objects.filter(utilisateur=self.request.user)
+        user = self.request.user
+        role = str(getattr(user, 'role', '')).upper().strip()
+
+        # Le RH et l'Admin voient tous les soldes
+        if role in ['RH', 'ADMIN_RH', 'DIRECTEUR', 'ADMIN']:
+            return SoldeConge.objects.all()
+
+        # Les employés/chefs ne voient que leur propre solde
+        return SoldeConge.objects.filter(utilisateur=user)
 
 
+# ⚙️ RESERVÉ A L'ADMIN (Configuration des jours fériés)
 class JourFerieViewSet(viewsets.ModelViewSet):
     queryset = JourFerie.objects.all()
     serializer_class = JourFerieSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsAdminUserRole]
 
 
+# 🏢 GESTION DES DEMANDES (Géré par RH pour la validation finale)
 class DemandeCongeViewSet(viewsets.ModelViewSet):
     serializer_class = DemandeCongeSerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -36,11 +53,11 @@ class DemandeCongeViewSet(viewsets.ModelViewSet):
         user = self.request.user
         role = str(getattr(user, 'role', '')).upper().strip()
 
-        # Administrateurs RH & Directeurs : vue globale
+        # RH et Admin voient toutes les demandes
         if role in ['RH', 'ADMIN_RH', 'DIRECTEUR', 'ADMIN']:
             return DemandeConge.objects.all().order_by('-created_at')
 
-        # Chefs de service : voir les demandes du service + ses propres demandes
+        # Le Chef de Service voit les demandes de son service
         if role in ['CHEF_SERVICE', 'CHEF']:
             if hasattr(user, 'service') and user.service:
                 return DemandeConge.objects.filter(
@@ -48,60 +65,75 @@ class DemandeCongeViewSet(viewsets.ModelViewSet):
                 ).order_by('-created_at')
             return DemandeConge.objects.all().order_by('-created_at')
 
-        # Employés : leurs propres demandes uniquement
+        # L'employé classique ne voit que ses propres demandes
         return DemandeConge.objects.filter(utilisateur=user).order_by('-created_at')
 
     def perform_create(self, serializer):
-        # Règle métier : Initialisation du statut lors de la soumission
+        user = self.request.user
+        role = str(getattr(user, 'role', '')).upper().strip()
+        
         type_conge = serializer.validated_data.get('type_conge')
+        date_debut = serializer.validated_data.get('date_debut')
+        date_fin = serializer.validated_data.get('date_fin')
         libelle_type = getattr(type_conge, 'libelle', '').upper() if type_conge else ''
 
-        # Maladie moyenne/longue durée -> Passe directement par l'avis du Conseil de Santé
+        # 1. Calcul automatique des jours ouvrables
+        nb_jours_reels = calculer_jours_ouvrables(date_debut, date_fin)
+
+        # 2. Circuit de validation : Le RH et le CHEF créent directement au statut EN_ATTENTE_RH
         if 'MOYENNE' in libelle_type or 'LONGUE' in libelle_type:
-            statut_depart = 'EN_ATTENTE_CONSEIL_SANTE'
+            statut_depart = 'EN_ATTENTE_SANTE'
+        elif role in ['CHEF_SERVICE', 'CHEF', 'RH', 'ADMIN_RH']:
+            statut_depart = 'EN_ATTENTE_RH'
         else:
             statut_depart = 'EN_ATTENTE_CHEF'
 
-        serializer.save(utilisateur=self.request.user, statut=statut_depart)
+        # 3. Sauvegarde
+        serializer.save(
+            utilisateur=user,
+            nombre_jours=nb_jours_reels,
+            statut=statut_depart
+        )
 
     @action(detail=True, methods=['post', 'patch', 'put'])
     def valider(self, request, pk=None):
         try:
             demande = self.get_object()
             commentaire = request.data.get('commentaire', '')
-
-            # 1. Mise à jour du statut de la demande selon le rôle
             role = str(getattr(request.user, 'role', '')).upper().strip()
-            if role in ['CHEF_SERVICE', 'CHEF']:
+
+            # Validation définitive si faite par le RH (ou Admin)
+            if demande.statut == 'EN_ATTENTE_RH' or role in ['RH', 'ADMIN_RH', 'DIRECTEUR', 'ADMIN']:
+                demande.statut = 'VALIDEE'
+
+                # Déduction automatique du solde
+                annee_actuelle = demande.date_debut.year if demande.date_debut else datetime.now().year
+                solde, _ = SoldeConge.objects.get_or_create(
+                    utilisateur=demande.utilisateur,
+                    annee=annee_actuelle,
+                    defaults={'droits_acquis': 22.0, 'jours_reportes': 0.0, 'jours_consommes': 0.0}
+                )
+                solde.jours_consommes += demande.nombre_jours
+                solde.save()
+
+            elif role in ['CHEF_SERVICE', 'CHEF']:
                 demande.statut = 'EN_ATTENTE_RH'
-            else:
-                demande.statut = 'VALIDE'
+
             demande.save()
 
-            # 2. Création de l'étape de validation sécurisée
-            try:
-                # Teste d'abord le champ 'valideur', sinon fallback sur 'validateur'
-                try:
-                    EtapeValidation.objects.create(
-                        demande=demande,
-                        valideur=request.user,
-                        statut='APPROUVE',
-                        commentaire=commentaire
-                    )
-                except Exception:
-                    EtapeValidation.objects.create(
-                        demande=demande,
-                        validateur=request.user,
-                        statut='APPROUVE',
-                        commentaire=commentaire
-                    )
-            except Exception as err_etape:
-                print("⚠️ Erreur création historique EtapeValidation :", str(err_etape))
+            EtapeValidation.objects.create(
+                demande=demande,
+                validateur=request.user,
+                role_validateur=role or 'RH',
+                decision='ACCORDE',
+                commentaire=commentaire
+            )
 
             return Response({'status': 'Demande validée avec succès'}, status=status.HTTP_200_OK)
 
         except Exception as e:
-            print("=== ERREUR VALIDATION BACKEND ===", str(e))
+            print("=== ERREUR VALIDATION BACKEND ===")
+            traceback.print_exc()
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     @action(detail=True, methods=['post', 'patch', 'put'])
@@ -109,74 +141,28 @@ class DemandeCongeViewSet(viewsets.ModelViewSet):
         try:
             demande = self.get_object()
             commentaire = request.data.get('commentaire', '')
+            role = str(getattr(request.user, 'role', '')).upper().strip()
 
-            # 1. Mise à jour du statut de la demande
-            demande.statut = 'REFUSEE'
+            demande.statut = 'REFUSEE_RH' if role in ['RH', 'ADMIN_RH', 'DIRECTEUR', 'ADMIN'] else 'REFUSEE_CHEF'
             demande.save()
 
-            # 2. Création de l'étape de refus sécurisée
-            try:
-                try:
-                    EtapeValidation.objects.create(
-                        demande=demande,
-                        valideur=request.user,
-                        statut='REFUSE',
-                        commentaire=commentaire
-                    )
-                except Exception:
-                    EtapeValidation.objects.create(
-                        demande=demande,
-                        validateur=request.user,
-                        statut='REFUSE',
-                        commentaire=commentaire
-                    )
-            except Exception as err_etape:
-                print("⚠️ Erreur création historique EtapeValidation :", str(err_etape))
+            EtapeValidation.objects.create(
+                demande=demande,
+                validateur=request.user,
+                role_validateur=role or 'RH',
+                decision='REFUSE',
+                commentaire=commentaire
+            )
 
             return Response({'status': 'Demande refusée'}, status=status.HTTP_200_OK)
 
         except Exception as e:
-            print("=== ERREUR REFUS BACKEND ===", str(e))
+            print("=== ERREUR REFUS BACKEND ===")
+            traceback.print_exc()
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
 class EtapeValidationViewSet(viewsets.ModelViewSet):
     queryset = EtapeValidation.objects.all()
     serializer_class = EtapeValidationSerializer
     permission_classes = [permissions.IsAuthenticated]
-
-    def create(self, request, *args, **kwargs):
-        # 1. Extraction des données
-        demande_id = request.data.get('demande')
-        statut_input = request.data.get('statut', 'APPROUVE')
-        commentaire = request.data.get('commentaire', '')
-
-        # 2. Vérification existence de la demande
-        try:
-            demande = DemandeConge.objects.get(pk=demande_id)
-        except DemandeConge.DoesNotExist:
-            return Response({'error': 'Demande introuvable'}, status=status.HTTP_400_BAD_REQUEST)
-
-        # 3. Création directe en BDD sans passer par serializer.is_valid()
-        # Cela évite les erreurs de validation des ForeignKeys obligatoires
-        etape_kwargs = {
-            'demande': demande,
-            'statut': statut_input,
-            'commentaire': commentaire
-        }
-
-        # Détection automatique du nom du champ Utilisateur
-        if hasattr(EtapeValidation, 'valideur'):
-            etape_kwargs['valideur'] = request.user
-        elif hasattr(EtapeValidation, 'validateur'):
-            etape_kwargs['validateur'] = request.user
-
-        EtapeValidation.objects.create(**etape_kwargs)
-
-        # 4. Changement du statut de la demande selon le rôle
-        role = str(getattr(request.user, 'role', '')).upper().strip()
-        if role in ['CHEF_SERVICE', 'CHEF']:
-            demande.statut = 'EN_ATTENTE_RH'
-        else:
-            demande.statut = 'VALIDE'
-
-        demande.save()
-        return Response({'message': 'Validation effectuée'}, status=status.HTTP_201_CREATED)

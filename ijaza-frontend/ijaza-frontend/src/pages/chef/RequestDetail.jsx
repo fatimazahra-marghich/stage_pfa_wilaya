@@ -19,17 +19,16 @@ export default function RequestDetail() {
   useEffect(() => {
     async function charger() {
       try {
-        // Récupération de la demande ciblée
-        const { data: d } = await api.get(`/conges/demandes/${id}/`);
+        // ✅ Corrected endpoints without /conges/
+        const { data: d } = await api.get(`/demandes/${id}/`);
         setDemande(d);
 
-        // Récupération de l'ensemble des demandes pour vérifier les chevauchements d'équipe
-        const { data: equipe } = await api.get("/conges/demandes/");
+        const { data: equipe } = await api.get("/demandes/");
         const liste = equipe.results ?? equipe;
         const autres = liste.filter(
           (autre) =>
             autre.id !== d.id &&
-            autre.statut === "VALIDEE" &&
+            autre.statut === "VALIDE" &&
             sePeuventChevaucher(d.date_debut, d.date_fin, autre.date_debut, autre.date_fin)
         );
         setChevauchements(autres);
@@ -41,28 +40,25 @@ export default function RequestDetail() {
   }, [id]);
 
   async function traiter(decision) {
-    if ((decision === "REFUSEE" || decision === "REFUSE") && !commentaire.trim()) {
+    const estRefus = decision.startsWith("REFUS");
+
+    if (estRefus && !commentaire.trim()) {
       alert("Un commentaire est obligatoire en cas de refus.");
       return;
     }
 
-    const statutFinal = decision.startsWith("REFUS") ? "REFUSEE" : "VALIDEE";
     setEnvoi(true);
 
     try {
-      // 1. Enregistrement de l'étape de validation dans Django
-      await api.post("/conges/etapes-validation/", {
-        demande: id,
-        statut: statutFinal,
-        commentaire: commentaire,
-      });
+      // ✅ Corrected endpoints without /conges/
+      const endpoint = estRefus
+        ? `/demandes/${id}/refuser/`
+        : `/demandes/${id}/valider/`;
 
-      // 2. Mise à jour du statut global
-      await api.patch(`/conges/demandes/${id}/`, {
-        statut: statutFinal,
-      });
+      await api.post(endpoint, { commentaire });
 
-      navigate("/chef/demandes");
+      alert("Décision enregistrée avec succès !");
+      navigate(-1);
     } catch (err) {
       console.error("Erreur lors du traitement de la demande :", err);
       alert("Une erreur est survenue lors de l'enregistrement de votre décision.");
@@ -80,7 +76,12 @@ export default function RequestDetail() {
   }
 
   const estEnAttente =
-    demande.statut === "EN_ATTENTE_CHEF" || demande.statut === "EN_ATTENTE_NIVEAU1";
+    demande.statut === "EN_ATTENTE_CHEF" || demande.statut === "EN_ATTENTE_NIVEAU1" || demande.statut === "EN_ATTENTE";
+
+  const userDetails = demande.utilisateur_details;
+  const nomAffichage = userDetails
+    ? (userDetails.nom_complet || `${userDetails.first_name || userDetails.prenom || ''} ${userDetails.last_name || userDetails.nom || ''}`.trim())
+    : demande.utilisateur_nom || `Employé #${demande.utilisateur}`;
 
   return (
     <Layout>
@@ -97,16 +98,13 @@ export default function RequestDetail() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-        {/* Infos Utilisateur */}
         <div className="rounded-2xl border border-black/10 bg-white shadow-sm p-6">
           <div className="flex items-center gap-4 mb-6">
             <div className="w-14 h-14 rounded-full bg-neutral-200 flex items-center justify-center font-bold text-lg text-neutral-600">
-              {demande.utilisateur_nom ? demande.utilisateur_nom[0] : "E"}
+              {nomAffichage[0] ? nomAffichage[0].toUpperCase() : "E"}
             </div>
             <div>
-              <p className="font-semibold text-lg">
-                {demande.utilisateur_nom || `Employé #${demande.utilisateur}`}
-              </p>
+              <p className="font-semibold text-lg">{nomAffichage}</p>
             </div>
           </div>
           <dl className="space-y-4 text-sm">
@@ -136,7 +134,6 @@ export default function RequestDetail() {
           </dl>
         </div>
 
-        {/* Dates & Durée */}
         <div className="rounded-2xl border border-black/10 bg-white shadow-sm p-6">
           <h2 className="font-bold mb-4">Informations du congé</h2>
           <div className="grid grid-cols-2 gap-4 text-sm">
@@ -158,7 +155,6 @@ export default function RequestDetail() {
         </div>
       </div>
 
-      {/* Chevauchements d'équipe */}
       {chevauchements.length > 0 && (
         <div className="rounded-2xl border border-black/10 bg-white shadow-sm p-6 mb-6">
           <h2 className="font-bold mb-4">Impact sur l'équipe</h2>
@@ -172,7 +168,9 @@ export default function RequestDetail() {
           <div className="divide-y divide-black/5">
             {chevauchements.map((c) => (
               <div key={c.id} className="flex items-center justify-between py-3 text-sm">
-                <span className="font-medium">{c.utilisateur_nom || `Employé #${c.utilisateur}`}</span>
+                <span className="font-medium">
+                  {c.utilisateur_details?.nom_complet || c.utilisateur_nom || `Employé #${c.utilisateur}`}
+                </span>
                 <span className="text-neutral-500">
                   {c.date_debut} — {c.date_fin}
                 </span>
@@ -182,7 +180,6 @@ export default function RequestDetail() {
         </div>
       )}
 
-      {/* Prise de décision */}
       {estEnAttente && (
         <div className="rounded-2xl border border-black/10 bg-white shadow-sm p-6">
           <h2 className="font-bold mb-4">Décision du Chef de service</h2>

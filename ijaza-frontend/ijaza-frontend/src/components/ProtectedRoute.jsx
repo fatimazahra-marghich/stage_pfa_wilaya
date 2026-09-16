@@ -4,7 +4,6 @@ import { useAuth } from "../context/AuthContext";
 export default function ProtectedRoute({ children, rolesAutorises }) {
   const { user, loading } = useAuth();
 
-  // Attendre la vérification de la session avant de rediriger
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-white">
@@ -13,13 +12,14 @@ export default function ProtectedRoute({ children, rolesAutorises }) {
     );
   }
 
-  // Rediriger vers le login si l'utilisateur n'est pas connecté
   if (!user) {
     return <Navigate to="/login" replace />;
   }
 
-  // Rediriger si l'utilisateur n'a pas le rôle requis
-  if (rolesAutorises && !rolesAutorises.includes(user.role)) {
+  // Support des équivalences de rôles (ex: ADMIN_RH équivaut à RH)
+  const userRole = user?.role === 'ADMIN_RH' ? 'RH' : user?.role;
+
+  if (rolesAutorises && !rolesAutorises.includes(user.role) && !rolesAutorises.includes(userRole)) {
     return <Navigate to="/login" replace />;
   }
 

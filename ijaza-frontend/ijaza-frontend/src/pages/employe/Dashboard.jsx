@@ -15,8 +15,8 @@ export default function DashboardEmploye() {
     async function charger() {
       try {
         const [{ data: soldes }, { data: demandesData }] = await Promise.all([
-          api.get("/conges/soldes/"),
-          api.get("/conges/demandes/"),
+          api.get("/soldes/"),
+          api.get("/demandes/"),
         ]);
         setSolde(soldes.results?.[0] ?? soldes[0] ?? null);
         const liste = demandesData.results ?? demandesData;
@@ -30,7 +30,6 @@ export default function DashboardEmploye() {
     charger();
   }, []);
 
-  // Adapté aux champs réels du modèle SoldeConge Django
   const restant = solde ? solde.solde_actuel : 0;
   const acquisTotal = solde ? (solde.droits_acquis + solde.jours_reportes) : 0;
   const pourcentage = acquisTotal > 0 ? Math.max(0, Math.min(100, (restant / acquisTotal) * 100)) : 0;

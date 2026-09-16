@@ -17,7 +17,7 @@ export default function NewRequest() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    api.get("conges/types-conge/")
+    api.get("/types-conge/")
       .then(({ data }) => setTypes(Array.isArray(data) ? data : (data.results || [])))
       .catch((err) => console.error("Erreur chargement types :", err));
   }, []);
@@ -71,13 +71,13 @@ export default function NewRequest() {
         formData.append("piece_jointe", pieceJointe);
       }
 
-      await api.post("conges/demandes/", formData, {
+      await api.post("/demandes/", formData, {
         headers: { "Content-Type": "multipart/form-data" },
       });
 
       navigate("/employe");
     } catch (err) {
-      console.error("Détails de l'erreur 400 :", err.response?.data || err);
+      console.error("Détails de l'erreur :", err.response?.data || err);
       
       const backendError = err.response?.data;
       if (typeof backendError === "object" && backendError !== null) {
@@ -142,7 +142,6 @@ export default function NewRequest() {
             </div>
           </div>
 
-          {/* Affichage du nombre de jours */}
           {nbJours > 0 && (
             <p className="text-xs font-semibold text-[#E91E8C]">
               Durée estimée : {nbJours} jour{nbJours > 1 ? "s" : ""}

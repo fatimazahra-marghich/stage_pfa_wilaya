@@ -13,7 +13,8 @@ export default function TeamCalendar() {
   const [curseur, setCurseur] = useState(new Date());
 
   useEffect(() => {
-    api.get("/conges/demandes/").then(({ data }) => setDemandes(data.results ?? data));
+    // ✅ Corrected endpoint without /conges/
+    api.get("/demandes/").then(({ data }) => setDemandes(data.results ?? data));
   }, []);
 
   const annee = curseur.getFullYear();
@@ -24,7 +25,7 @@ export default function TeamCalendar() {
   const agents = useMemo(() => {
     const parAgent = {};
     demandes
-      .filter((d) => d.statut === "VALIDEE")
+      .filter((d) => d.statut === "VALIDEE" || d.statut === "VALIDE")
       .forEach((d) => {
         const key = d.utilisateur;
         if (!parAgent[key]) {

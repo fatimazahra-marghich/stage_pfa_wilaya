@@ -13,7 +13,8 @@ export default function CorrectSolde() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    api.get("/conges/soldes/").then(({ data }) => setSoldes(data.results ?? data));
+    // ✅ Corrected endpoint without /conges/
+    api.get("/soldes/").then(({ data }) => setSoldes(data.results ?? data));
   }, []);
 
   const soldeSelectionne = soldes.find((s) => String(s.id) === String(soldeId));
@@ -27,7 +28,8 @@ export default function CorrectSolde() {
     }
     setEnvoi(true);
     try {
-      await api.post("/conges/corrections-solde/", {
+      // ✅ Corrected endpoint without /conges/
+      await api.post("/corrections-solde/", {
         solde_conge: soldeId,
         nouveau_solde: parseFloat(nouveauSolde),
         motif,

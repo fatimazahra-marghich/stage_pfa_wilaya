@@ -7,7 +7,7 @@ export default function History() {
   const [demandes, setDemandes] = useState([]);
 
   useEffect(() => {
-    api.get("/conges/demandes/").then(({ data }) => setDemandes(data.results ?? data));
+    api.get("/demandes/").then(({ data }) => setDemandes(data.results ?? data));
   }, []);
 
   return (
@@ -35,7 +35,6 @@ export default function History() {
                 <td className="px-6 py-4 text-neutral-600">
                   {d.date_debut} — {d.date_fin}
                 </td>
-                {/* Champ backend : nombre_jours */}
                 <td className="px-6 py-4 text-neutral-600">{d.nombre_jours} jours</td>
                 <td className="px-6 py-4">
                   <StatutBadge statut={d.statut} />

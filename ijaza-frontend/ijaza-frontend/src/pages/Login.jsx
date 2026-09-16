@@ -5,7 +5,9 @@ import { useAuth } from "../context/AuthContext";
 const REDIRECTION_PAR_ROLE = {
   EMPLOYE: "/employe",
   CHEF_SERVICE: "/chef",
-  ADMIN_RH: "/admin",
+  RH: "/rh",
+  ADMIN_RH: "/rh",
+  ADMIN: "/admin/employes",
 };
 
 export default function Login() {
@@ -24,11 +26,10 @@ export default function Login() {
     setChargement(true);
 
     try {
-      // Transmission de email et password
       const user = await login(email, password);
-      navigate(REDIRECTION_PAR_ROLE[user.role] ?? "/");
+      const userRole = user?.role === 'ADMIN_RH' ? 'RH' : user?.role;
+      navigate(REDIRECTION_PAR_ROLE[userRole] ?? "/");
     } catch (err) {
-      // Récupération du message d'erreur renvoyé par Django 401
       setErreur(
         err.response?.data?.detail || "Adresse email ou mot de passe incorrect."
       );
@@ -75,7 +76,6 @@ export default function Login() {
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-5">
-            {/* Champ Email */}
             <div>
               <label className="block text-xs font-bold text-[#E91E8C] tracking-wider uppercase mb-2">
                 ADRESSE EMAIL
@@ -90,7 +90,6 @@ export default function Login() {
               />
             </div>
 
-            {/* Champ Mot de passe */}
             <div>
               <label className="block text-xs font-bold text-[#E91E8C] tracking-wider uppercase mb-2">
                 MOT DE PASSE
@@ -114,14 +113,12 @@ export default function Login() {
               </div>
             </div>
 
-            {/* Affichage du message d'erreur */}
             {erreur && (
               <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-red-600 text-sm font-medium">
                 {erreur}
               </div>
             )}
 
-            {/* Bouton Se connecter */}
             <button
               type="submit"
               disabled={chargement}

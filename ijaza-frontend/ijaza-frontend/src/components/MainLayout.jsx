@@ -21,16 +21,16 @@ const Icone = ({ d }) => (
 const MENU = "M4 7h16M4 12h16M4 17h16";
 const CROIX = "M18 6L6 18M6 6l12 12";
 
-export default function Layout({ children }) {
+export default function MainLayout({ children }) {
   const [menuOuvert, setMenuOuvert] = useState(false);
   const { pathname } = useLocation();
 
-  // Fermer le menu lors d'un changement de page
+  /* Fermer le menu après changement de page */
   useEffect(() => {
     setMenuOuvert(false);
   }, [pathname]);
 
-  // Fermer le menu avec la touche Échap
+  /* Fermer avec Échap */
   useEffect(() => {
     function surTouche(e) {
       if (e.key === "Escape") {
@@ -46,59 +46,82 @@ export default function Layout({ children }) {
   }, []);
 
   return (
-    <div className="flex min-h-screen bg-[#f6fdfe]">
+    <div className="flex h-screen w-full overflow-hidden bg-[#f6fdfe]">
 
       {/* ========================================================= */}
-      {/* SIDEBAR DESKTOP                                           */}
+      {/* SIDEBAR DESKTOP — FIXE                                    */}
       {/* ========================================================= */}
-      <div className="hidden lg:block">
+
+      <aside className="hidden h-screen shrink-0 lg:block">
         <Sidebar />
-      </div>
+      </aside>
 
       {/* ========================================================= */}
-      {/* DÉGRADÉ ENTRE LA SIDEBAR ET LA PAGE                      */}
+      {/* DÉGRADÉ ENTRE SIDEBAR ET PAGE                             */}
       {/* ========================================================= */}
+
       <div
         className="
-          hidden lg:block
+          hidden
+          h-screen
           w-1
           shrink-0
           bg-gradient-to-b
           from-[#e7ffff]
           via-[#f4fdff]
           to-[#eef4ff]
+          lg:block
         "
       />
 
       {/* ========================================================= */}
       {/* MENU MOBILE                                               */}
       {/* ========================================================= */}
-      {menuOuvert && (
-        <div className="fixed inset-0 z-40 lg:hidden">
 
-          {/* Overlay */}
+      {menuOuvert && (
+        <div className="fixed inset-0 z-50 lg:hidden">
+
+          {/* Fond sombre */}
           <div
-            className="absolute inset-0 bg-[#3c0038]/50 backdrop-blur-sm"
+            className="
+              absolute
+              inset-0
+              bg-[#3c0038]/50
+              backdrop-blur-sm
+            "
             onClick={() => setMenuOuvert(false)}
           />
 
           {/* Sidebar mobile */}
-          <div className="absolute inset-y-0 left-0 max-w-[85vw] shadow-2xl">
-            <Sidebar onNavigate={() => setMenuOuvert(false)} />
-          </div>
-
+          <aside
+            className="
+              absolute
+              inset-y-0
+              left-0
+              w-[280px]
+              max-w-[85vw]
+              bg-white
+              shadow-2xl
+            "
+          >
+            <Sidebar
+              onNavigate={() => setMenuOuvert(false)}
+            />
+          </aside>
         </div>
       )}
 
       {/* ========================================================= */}
-      {/* CONTENU PRINCIPAL                                         */}
+      {/* ZONE DROITE                                               */}
       {/* ========================================================= */}
+
       <div
         className="
           flex
           min-w-0
           flex-1
           flex-col
+          overflow-hidden
           bg-gradient-to-r
           from-[#e7ffff]
           via-[#f4fdff]
@@ -107,14 +130,13 @@ export default function Layout({ children }) {
       >
 
         {/* ======================================================= */}
-        {/* BARRE SUPÉRIEURE MOBILE                                */}
+        {/* BARRE MOBILE                                            */}
         {/* ======================================================= */}
+
         <header
           className="
-            sticky
-            top-0
-            z-30
             flex
+            shrink-0
             items-center
             gap-3
             border-b
@@ -126,8 +148,8 @@ export default function Layout({ children }) {
             lg:hidden
           "
         >
-
           <button
+            type="button"
             onClick={() => setMenuOuvert(true)}
             className="
               grid
@@ -140,33 +162,37 @@ export default function Layout({ children }) {
               text-[#3c0038]
               transition-colors
               hover:bg-[#e7ffff]
-              focus-visible:outline
-              focus-visible:outline-2
-              focus-visible:outline-offset-2
-              focus-visible:outline-[#0097ff]
             "
             aria-label="Ouvrir le menu"
             aria-expanded={menuOuvert}
           >
-            <Icone d={menuOuvert ? CROIX : MENU} />
+            <Icone d={MENU} />
           </button>
 
           <p className="text-lg font-bold tracking-tight text-[#3c0038]">
             Ijaza
           </p>
-
         </header>
 
         {/* ======================================================= */}
-        {/* CONTENU DE LA PAGE                                     */}
+        {/* SEULE CETTE ZONE SCROLLE                                */}
         {/* ======================================================= */}
-        <main className="min-w-0 flex-1 p-6 lg:p-8">
-          {children}
-        </main>
 
+        <main
+          className="
+            min-h-0
+            min-w-0
+            flex-1
+            overflow-y-auto
+            overflow-x-hidden
+          "
+        >
+          <div className="p-6 lg:p-8">
+            {children}
+          </div>
+        </main>
       </div>
     </div>
   );
 }
-
 

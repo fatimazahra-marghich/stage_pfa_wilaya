@@ -1,35 +1,124 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import api from "../../api/axios";
-import Layout from "../../components/Layout";
+import MainLayout from "../../components/MainLayout";
+
+/* ------------------------------------------------------------------ */
+/* Icônes                                                             */
+/* ------------------------------------------------------------------ */
+
+const Icone = ({ d, className = "h-4 w-4" }) => (
+  <svg
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.8"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+    aria-hidden="true"
+  >
+    {Array.isArray(d) ? (
+      d.map((p, i) => <path key={i} d={p} />)
+    ) : (
+      <path d={d} />
+    )}
+  </svg>
+);
+
+const I = {
+  plus: "M12 5v14M5 12h14",
+
+  crayon:
+    "M12 20h9M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z",
+
+  corbeille:
+    "M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6",
+
+  loupe:
+    "M11 19a8 8 0 100-16 8 8 0 000 16zM21 21l-4.3-4.3",
+
+  personnes:
+    "M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2M9 11a4 4 0 100-8 4 4 0 000 8zM23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75",
+
+  personne:
+    "M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2M12 11a4 4 0 100-8 4 4 0 000 8z",
+
+  bouclier:
+    "M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z",
+
+  batiment:
+    "M3 21h18M6 21V7l6-4 6 4v14M9 9h.01M15 9h.01M9 13h.01M15 13h.01M9 17h.01M15 17h.01",
+
+  calendrier:
+    "M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V6a2 2 0 012-2z",
+
+  croix: "M18 6L6 18M6 6l12 12",
+};
+
+/* ------------------------------------------------------------------ */
+/* Rôles                                                              */
+/* ------------------------------------------------------------------ */
+
+const ROLES = {
+  ADMIN: {
+    label: "Administrateur",
+    chip: "bg-[#3c0038]/10 text-[#3c0038]",
+  },
+
+  RH: {
+    label: "Ressources Humaines",
+    chip: "bg-[#93003f]/10 text-[#93003f]",
+  },
+
+  MANAGER: {
+    label: "Manager",
+    chip: "bg-[#0097ff]/10 text-[#0097ff]",
+  },
+
+  EMPLOYE: {
+    label: "Employé",
+    chip: "bg-neutral-100 text-neutral-600",
+  },
+};
 
 export default function EmployesPage() {
+  /* ---------------------------------------------------------------- */
+  /* États                                                             */
+  /* ---------------------------------------------------------------- */
+
   const [employes, setEmployes] = useState([]);
   const [departements, setDepartements] = useState([]);
+
   const [chargement, setChargement] = useState(true);
+
   const [recherche, setRecherche] = useState("");
   const [filtreRole, setFiltreRole] = useState("TOUS");
+  const [filtreDept, setFiltreDept] = useState("TOUS");
 
-  // State Modal
   const [formOuvert, setFormOuvert] = useState(false);
   const [empEnEdition, setEmpEnEdition] = useState(null);
 
-  // Formulaire local
   const [form, setForm] = useState({
     email: "",
     first_name: "",
     last_name: "",
-    role: "EMPLOYE", // EMPLOYE, MANAGER, RH, ADMIN
+    password: "",
+    role: "EMPLOYE",
     departement_id: "",
     solde_conge: 30,
     is_active: true,
   });
 
-  // Charger les données (employés + départements)
+  /* ---------------------------------------------------------------- */
+  /* Chargement des données                                           */
+  /* ---------------------------------------------------------------- */
+
   async function chargerDonnees() {
     setChargement(true);
+
     try {
       const [resEmp, resDep] = await Promise.all([
-        api.get("/utilisateurs/"), // ou /employes/
+        api.get("/utilisateurs/"),
         api.get("/departements/"),
       ]);
 
@@ -46,35 +135,76 @@ export default function EmployesPage() {
     chargerDonnees();
   }, []);
 
-  // Ouvrir la modal en mode Création ou Édition
+  /* ---------------------------------------------------------------- */
+  /* Fermer le formulaire avec Escape                                 */
+  /* ---------------------------------------------------------------- */
+
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === "Escape") {
+        setFormOuvert(false);
+      }
+    };
+
+    window.addEventListener("keydown", onKey);
+
+    return () => {
+      window.removeEventListener("keydown", onKey);
+    };
+  }, []);
+
+  /* ---------------------------------------------------------------- */
+  /* Ouvrir formulaire                                                 */
+  /* ---------------------------------------------------------------- */
+
   const ouvrirFormulaire = (emp = null) => {
     if (emp) {
       setEmpEnEdition(emp);
+
       setForm({
         email: emp.email || "",
         first_name: emp.first_name || emp.prenom || "",
         last_name: emp.last_name || emp.nom || "",
+        password: "",
         role: emp.role || "EMPLOYE",
-        departement_id: emp.departement?.id || emp.departement || "",
+        departement_id:
+          emp.departement?.id || emp.departement || "",
         solde_conge: emp.solde_conge ?? 30,
         is_active: emp.is_active ?? true,
       });
     } else {
       setEmpEnEdition(null);
+
       setForm({
         email: "",
         first_name: "",
         last_name: "",
+        password: "",
         role: "EMPLOYE",
         departement_id: "",
         solde_conge: 30,
         is_active: true,
       });
     }
+
     setFormOuvert(true);
   };
 
-  // Soumettre (POST ou PATCH)
+  /* ---------------------------------------------------------------- */
+  /* Modifier formulaire                                               */
+  /* ---------------------------------------------------------------- */
+
+  const modifierChamp = (champ, valeur) => {
+    setForm((ancien) => ({
+      ...ancien,
+      [champ]: valeur,
+    }));
+  };
+
+  /* ---------------------------------------------------------------- */
+  /* Enregistrer employé                                               */
+  /* ---------------------------------------------------------------- */
+
   async function handleSubmit(e) {
     e.preventDefault();
 
@@ -83,298 +213,884 @@ export default function EmployesPage() {
       first_name: form.first_name,
       last_name: form.last_name,
       role: form.role,
-      departement: form.departement_id || null,
+      departement: form.departement_id
+        ? parseInt(form.departement_id, 10)
+        : null,
       solde_conge: parseFloat(form.solde_conge),
       is_active: form.is_active,
     };
 
+    if (form.password) {
+      payload.password = form.password;
+    }
+
     try {
       if (empEnEdition) {
-        await api.patch(`/utilisateurs/${empEnEdition.id}/`, payload);
+        await api.patch(
+          `/utilisateurs/${empEnEdition.id}/`,
+          payload
+        );
       } else {
         await api.post("/utilisateurs/", payload);
       }
+
       setFormOuvert(false);
       chargerDonnees();
     } catch (err) {
-      console.error("Erreur d'enregistrement :", err.response?.data || err);
+      console.error(
+        "Erreur d'enregistrement :",
+        err.response?.data || err
+      );
+
       alert("Erreur lors de l'enregistrement de l'employé.");
     }
   }
 
-  // Supprimer un utilisateur
+  /* ---------------------------------------------------------------- */
+  /* Supprimer employé                                                */
+  /* ---------------------------------------------------------------- */
+
   async function handleSupprimer(id, nomComplet) {
-    if (!window.confirm(`Voulez-vous supprimer l'utilisateur "${nomComplet}" ?`)) return;
+    if (
+      !window.confirm(
+        `Voulez-vous supprimer l'utilisateur "${nomComplet}" ?`
+      )
+    ) {
+      return;
+    }
 
     try {
       await api.delete(`/utilisateurs/${id}/`);
       chargerDonnees();
     } catch (err) {
       console.error("Erreur de suppression :", err);
+
       alert("Impossible de supprimer cet utilisateur.");
     }
   }
 
-  // Filtrage local (Recherche texte + Filtre par rôle)
-  const employesFiltres = employes.filter((e) => {
-    const nomComplet = `${e.first_name || e.prenom || ""} ${e.last_name || e.nom || ""}`.toLowerCase();
-    const email = (e.email || "").toLowerCase();
-    const matchTexte = nomComplet.includes(recherche.toLowerCase()) || email.includes(recherche.toLowerCase());
-    
-    const matchRole = filtreRole === "TOUS" || e.role === filtreRole;
-    return matchTexte && matchRole;
-  });
+  /* ---------------------------------------------------------------- */
+  /* Filtrage                                                          */
+  /* ---------------------------------------------------------------- */
+
+  const employesFiltres = useMemo(() => {
+    const q = recherche.toLowerCase();
+
+    return employes.filter((e) => {
+      const nomComplet = `
+        ${e.first_name || e.prenom || ""}
+        ${e.last_name || e.nom || ""}
+      `.toLowerCase();
+
+      const email = (e.email || "").toLowerCase();
+
+      const matchTexte =
+        nomComplet.includes(q) || email.includes(q);
+
+      const matchRole =
+        filtreRole === "TOUS" || e.role === filtreRole;
+
+      const empDeptId =
+        e.departement?.id || e.departement;
+
+      const matchDept =
+        filtreDept === "TOUS" ||
+        String(empDeptId) === String(filtreDept);
+
+      return matchTexte && matchRole && matchDept;
+    });
+  }, [
+    employes,
+    recherche,
+    filtreRole,
+    filtreDept,
+  ]);
+
+  /* ---------------------------------------------------------------- */
+  /* Statistiques                                                      */
+  /* ---------------------------------------------------------------- */
+
+  const stats = useMemo(() => {
+    const total = employes.length;
+
+    const actifs = employes.filter(
+      (e) => e.is_active
+    ).length;
+
+    const congesTotal = employes.reduce(
+      (acc, e) =>
+        acc + (Number(e.solde_conge) || 0),
+      0
+    );
+
+    return {
+      total,
+      actifs,
+      congesTotal,
+    };
+  }, [employes]);
+
+  /* ---------------------------------------------------------------- */
+  /* Classes                                                           */
+  /* ---------------------------------------------------------------- */
+
+  const champ =
+    "w-full rounded-xl border border-neutral-200 bg-white px-4 py-2.5 text-sm text-neutral-800 outline-none transition focus:border-[#0097ff] focus:ring-4 focus:ring-[#0097ff]/10";
+
+  const labelCls =
+    "mb-1.5 block text-xs font-semibold text-[#3c0038]";
+
+  /* ---------------------------------------------------------------- */
+  /* Rendu                                                             */
+  /* ---------------------------------------------------------------- */
 
   return (
-    <Layout>
-      {/* En-tête */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-        <div>
-          <h1 className="text-3xl font-extrabold text-neutral-900">
-            Gestion du Personnel
-          </h1>
-          <p className="text-neutral-500 text-sm mt-1">
-            Gestion des comptes (Employés, Managers, RH) et de leurs soldes de congé
-          </p>
-        </div>
+    <MainLayout>
+      <div className="min-h-full bg-gradient-to-b from-[#e7ffff] via-[#f4fdff] to-[#eef4ff]">
+        <div className="mx-auto max-w-7xl">
 
-        <button
-          onClick={() => ouvrirFormulaire()}
-          className="rounded-xl bg-[#E91E8C] text-white px-5 py-2.5 text-sm font-bold hover:bg-[#c81879] transition-all shadow-md active:scale-95"
-        >
-          + Ajouter un membre
-        </button>
-      </div>
+          {/* ======================================================== */}
+          {/* EN-TÊTE                                                   */}
+          {/* ======================================================== */}
 
-      {/* Barre de Recherche et Filtres par Rôle */}
-      <div className="flex flex-col sm:flex-row gap-3 mb-6">
-        <input
-          type="text"
-          placeholder="🔍 Rechercher par nom, prénom ou email..."
-          value={recherche}
-          onChange={(e) => setRecherche(e.target.value)}
-          className="w-full max-w-md bg-white border border-neutral-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-[#E91E8C] shadow-sm"
-        />
-
-        <select
-          value={filtreRole}
-          onChange={(e) => setFiltreRole(e.target.value)}
-          className="bg-white border border-neutral-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-[#E91E8C] shadow-sm"
-        >
-          <option value="TOUS">Tous les rôles</option>
-          <option value="EMPLOYE">Employés</option>
-          <option value="MANAGER">Managers / Chefs</option>
-          <option value="RH">Ressources Humaines</option>
-        </select>
-      </div>
-
-      {/* Tableau des utilisateurs */}
-      {chargement ? (
-        <div className="py-12 text-center text-neutral-400 font-medium">
-          Chargement de la liste des employés...
-        </div>
-      ) : (
-        <div className="bg-white rounded-2xl border border-neutral-200/80 shadow-sm overflow-hidden">
-          <table className="w-full text-left text-sm">
-            <thead className="bg-neutral-50 border-b border-neutral-200 text-neutral-500 font-semibold">
-              <tr>
-                <th className="p-4">Employé</th>
-                <th className="p-4">Rôle</th>
-                <th className="p-4">Département</th>
-                <th className="p-4">Solde Congés</th>
-                <th className="p-4">Statut</th>
-                <th className="p-4 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-neutral-100">
-              {employesFiltres.length === 0 ? (
-                <tr>
-                  <td colSpan="6" className="p-8 text-center text-neutral-400 font-medium">
-                    Aucun employé ne correspond à la recherche.
-                  </td>
-                </tr>
-              ) : (
-                employesFiltres.map((emp) => {
-                  const nomComplet = `${emp.first_name || emp.prenom || ""} ${emp.last_name || emp.nom || ""}`;
-                  const nomDept = emp.departement_detail?.nom || emp.departement_nom || "-";
-
-                  return (
-                    <tr key={emp.id} className="hover:bg-neutral-50/50">
-                      <td className="p-4">
-                        <div className="font-bold text-neutral-900">{nomComplet || "Sans nom"}</div>
-                        <div className="text-xs text-neutral-400">{emp.email}</div>
-                      </td>
-                      <td className="p-4">
-                        <span
-                          className={`inline-block px-2.5 py-1 rounded-md text-xs font-bold ${
-                            emp.role === "RH"
-                              ? "bg-purple-100 text-purple-700"
-                              : emp.role === "MANAGER"
-                              ? "bg-blue-100 text-blue-700"
-                              : "bg-neutral-100 text-neutral-700"
-                          }`}
-                        >
-                          {emp.role || "EMPLOYE"}
-                        </span>
-                      </td>
-                      <td className="p-4 text-neutral-600 font-medium">{nomDept}</td>
-                      <td className="p-4">
-                        <span className="font-bold text-neutral-900">
-                          {emp.solde_conge ?? 0}
-                        </span>{" "}
-                        <span className="text-xs text-neutral-400">jours</span>
-                      </td>
-                      <td className="p-4">
-                        <span
-                          className={`inline-flex items-center gap-1 text-xs font-semibold ${
-                            emp.is_active ? "text-green-600" : "text-red-500"
-                          }`}
-                        >
-                          ● {emp.is_active ? "Actif" : "Inactif"}
-                        </span>
-                      </td>
-                      <td className="p-4 text-right space-x-3 text-xs font-semibold">
-                        <button
-                          onClick={() => ouvrirFormulaire(emp)}
-                          className="text-neutral-600 hover:text-black"
-                        >
-                          ✏️ Éditer
-                        </button>
-                        <button
-                          onClick={() => handleSupprimer(emp.id, nomComplet)}
-                          className="text-red-600 hover:text-red-800"
-                        >
-                          🗑️ Supprimer
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {/* Modal Formulaire Ajouter / Éditer */}
-      {formOuvert && (
-        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <form
-            onSubmit={handleSubmit}
-            className="bg-white rounded-2xl p-6 w-full max-w-lg space-y-4 shadow-2xl"
-          >
-            <h2 className="text-xl font-bold text-neutral-900">
-              {empEnEdition ? "Modifier le compte" : "Ajouter un nouvel employé"}
-            </h2>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-semibold text-neutral-600 mb-1">Prénom</label>
-                <input
-                  type="text"
-                  value={form.first_name}
-                  onChange={(e) => setForm({ ...form, first_name: e.target.value })}
-                  required
-                  className="w-full rounded-xl border border-neutral-300 px-3 py-2 text-sm outline-none focus:border-[#E91E8C]"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-neutral-600 mb-1">Nom</label>
-                <input
-                  type="text"
-                  value={form.last_name}
-                  onChange={(e) => setForm({ ...form, last_name: e.target.value })}
-                  required
-                  className="w-full rounded-xl border border-neutral-300 px-3 py-2 text-sm outline-none focus:border-[#E91E8C]"
-                />
-              </div>
-            </div>
-
+          <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <label className="block text-xs font-semibold text-neutral-600 mb-1">Email professionnel</label>
-              <input
-                type="email"
-                value={form.email}
-                onChange={(e) => setForm({ ...form, email: e.target.value })}
-                required
-                className="w-full rounded-xl border border-neutral-300 px-4 py-2 text-sm outline-none focus:border-[#E91E8C]"
-              />
+              <div className="mb-2 flex items-center gap-2">
+                <div className="grid h-10 w-10 place-items-center rounded-xl bg-[#3c0038] text-white shadow-sm">
+                  <Icone
+                    d={I.personnes}
+                    className="h-5 w-5"
+                  />
+                </div>
+
+                <div>
+                  <h1 className="text-2xl font-bold tracking-tight text-[#3c0038]">
+                    Employés
+                  </h1>
+
+                  <p className="text-sm text-neutral-500">
+                    Gestion des utilisateurs de l'entreprise
+                  </p>
+                </div>
+              </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
+            <button
+              type="button"
+              onClick={() => ouvrirFormulaire()}
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#3c0038] px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-[#93003f] focus:outline-none focus:ring-4 focus:ring-[#3c0038]/10"
+            >
+              <Icone d={I.plus} />
+              Ajouter un employé
+            </button>
+          </div>
+
+          {/* ======================================================== */}
+          {/* STATISTIQUES                                               */}
+          {/* ======================================================== */}
+
+          <div className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+
+            {/* Total */}
+            <div className="rounded-2xl border border-white/70 bg-white/80 p-5 shadow-sm backdrop-blur">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-neutral-500">
+                    Total employés
+                  </p>
+
+                  <p className="mt-1 text-3xl font-bold text-[#3c0038]">
+                    {stats.total}
+                  </p>
+                </div>
+
+                <div className="grid h-11 w-11 place-items-center rounded-xl bg-[#3c0038]/10 text-[#3c0038]">
+                  <Icone
+                    d={I.personnes}
+                    className="h-5 w-5"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Actifs */}
+            <div className="rounded-2xl border border-white/70 bg-white/80 p-5 shadow-sm backdrop-blur">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-neutral-500">
+                    Employés actifs
+                  </p>
+
+                  <p className="mt-1 text-3xl font-bold text-[#0097ff]">
+                    {stats.actifs}
+                  </p>
+                </div>
+
+                <div className="grid h-11 w-11 place-items-center rounded-xl bg-[#0097ff]/10 text-[#0097ff]">
+                  <Icone
+                    d={I.personne}
+                    className="h-5 w-5"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Congés */}
+            <div className="rounded-2xl border border-white/70 bg-white/80 p-5 shadow-sm backdrop-blur">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-neutral-500">
+                    Solde congés total
+                  </p>
+
+                  <p className="mt-1 text-3xl font-bold text-[#93003f]">
+                    {stats.congesTotal}
+                  </p>
+
+                  <p className="text-xs text-neutral-400">
+                    jours disponibles
+                  </p>
+                </div>
+
+                <div className="grid h-11 w-11 place-items-center rounded-xl bg-[#93003f]/10 text-[#93003f]">
+                  <Icone
+                    d={I.calendrier}
+                    className="h-5 w-5"
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* ======================================================== */}
+          {/* FILTRES                                                    */}
+          {/* ======================================================== */}
+
+          <div className="mb-6 rounded-2xl border border-white/70 bg-white/80 p-5 shadow-sm backdrop-blur">
+            <div className="grid gap-4 md:grid-cols-3">
+
+              {/* Recherche */}
               <div>
-                <label className="block text-xs font-semibold text-neutral-600 mb-1">Rôle Système</label>
+                <label className={labelCls}>
+                  Rechercher
+                </label>
+
+                <div className="relative">
+                  <Icone
+                    d={I.loupe}
+                    className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400"
+                  />
+
+                  <input
+                    type="text"
+                    value={recherche}
+                    onChange={(e) =>
+                      setRecherche(e.target.value)
+                    }
+                    placeholder="Nom ou email..."
+                    className={`${champ} pl-10`}
+                  />
+                </div>
+              </div>
+
+              {/* Rôle */}
+              <div>
+                <label className={labelCls}>
+                  Rôle
+                </label>
+
                 <select
-                  value={form.role}
-                  onChange={(e) => setForm({ ...form, role: e.target.value })}
-                  className="w-full rounded-xl border border-neutral-300 px-3 py-2 text-sm outline-none focus:border-[#E91E8C] bg-white"
+                  value={filtreRole}
+                  onChange={(e) =>
+                    setFiltreRole(e.target.value)
+                  }
+                  className={champ}
                 >
-                  <option value="EMPLOYE">Employé</option>
-                  <option value="MANAGER">Chef d'équipe / Manager</option>
-                  <option value="RH">Ressources Humaines</option>
-                  <option value="ADMIN">Administrateur</option>
+                  <option value="TOUS">
+                    Tous les rôles
+                  </option>
+
+                  {Object.entries(ROLES).map(
+                    ([key, value]) => (
+                      <option key={key} value={key}>
+                        {value.label}
+                      </option>
+                    )
+                  )}
                 </select>
               </div>
 
+              {/* Département */}
               <div>
-                <label className="block text-xs font-semibold text-neutral-600 mb-1">Département</label>
+                <label className={labelCls}>
+                  Département
+                </label>
+
                 <select
-                  value={form.departement_id}
-                  onChange={(e) => setForm({ ...form, departement_id: e.target.value })}
-                  className="w-full rounded-xl border border-neutral-300 px-3 py-2 text-sm outline-none focus:border-[#E91E8C] bg-white"
+                  value={filtreDept}
+                  onChange={(e) =>
+                    setFiltreDept(e.target.value)
+                  }
+                  className={champ}
                 >
-                  <option value="">-- Aucun --</option>
-                  {departements.map((d) => (
-                    <option key={d.id} value={d.id}>
-                      {d.nom || d.libelle}
+                  <option value="TOUS">
+                    Tous les départements
+                  </option>
+
+                  {departements.map((dept) => (
+                    <option
+                      key={dept.id}
+                      value={dept.id}
+                    >
+                      {dept.nom ||
+                        dept.name ||
+                        dept.libelle}
                     </option>
                   ))}
                 </select>
               </div>
             </div>
+          </div>
 
-            <div>
-              <label className="block text-xs font-semibold text-neutral-600 mb-1">Solde de congés (jours)</label>
-              <input
-                type="number"
-                step="0.5"
-                value={form.solde_conge}
-                onChange={(e) => setForm({ ...form, solde_conge: e.target.value })}
-                className="w-full rounded-xl border border-neutral-300 px-4 py-2 text-sm outline-none focus:border-[#E91E8C]"
-              />
+          {/* ======================================================== */}
+          {/* TABLEAU                                                    */}
+          {/* ======================================================== */}
+
+          <div className="overflow-hidden rounded-2xl border border-white/70 bg-white/90 shadow-sm">
+
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[900px]">
+
+                <thead className="border-b border-neutral-100 bg-neutral-50/80">
+                  <tr>
+                    <th className="px-5 py-4 text-left text-xs font-bold uppercase tracking-wide text-neutral-500">
+                      Employé
+                    </th>
+
+                    <th className="px-5 py-4 text-left text-xs font-bold uppercase tracking-wide text-neutral-500">
+                      Rôle
+                    </th>
+
+                    <th className="px-5 py-4 text-left text-xs font-bold uppercase tracking-wide text-neutral-500">
+                      Département
+                    </th>
+
+                    <th className="px-5 py-4 text-left text-xs font-bold uppercase tracking-wide text-neutral-500">
+                      Solde congé
+                    </th>
+
+                    <th className="px-5 py-4 text-left text-xs font-bold uppercase tracking-wide text-neutral-500">
+                      Statut
+                    </th>
+
+                    <th className="px-5 py-4 text-right text-xs font-bold uppercase tracking-wide text-neutral-500">
+                      Actions
+                    </th>
+                  </tr>
+                </thead>
+
+                <tbody className="divide-y divide-neutral-100">
+
+                  {chargement ? (
+                    <tr>
+                      <td
+                        colSpan="6"
+                        className="px-5 py-12 text-center"
+                      >
+                        <div className="flex items-center justify-center gap-3 text-sm text-neutral-500">
+                          <div className="h-5 w-5 animate-spin rounded-full border-2 border-[#0097ff]/20 border-t-[#0097ff]" />
+                          Chargement des employés...
+                        </div>
+                      </td>
+                    </tr>
+                  ) : employesFiltres.length === 0 ? (
+                    <tr>
+                      <td
+                        colSpan="6"
+                        className="px-5 py-12 text-center"
+                      >
+                        <div className="mx-auto grid h-12 w-12 place-items-center rounded-full bg-neutral-100 text-neutral-400">
+                          <Icone
+                            d={I.personnes}
+                            className="h-6 w-6"
+                          />
+                        </div>
+
+                        <p className="mt-3 text-sm font-semibold text-neutral-700">
+                          Aucun employé trouvé
+                        </p>
+
+                        <p className="mt-1 text-xs text-neutral-400">
+                          Modifiez vos critères de recherche.
+                        </p>
+                      </td>
+                    </tr>
+                  ) : (
+                    employesFiltres.map((emp) => {
+                      const prenom =
+                        emp.first_name ||
+                        emp.prenom ||
+                        "";
+
+                      const nom =
+                        emp.last_name ||
+                        emp.nom ||
+                        "";
+
+                      const nomComplet =
+                        `${prenom} ${nom}`.trim();
+
+                      const role =
+                        ROLES[emp.role] ||
+                        ROLES.EMPLOYE;
+
+                      const departement =
+                        emp.departement?.nom ||
+                        emp.departement?.name ||
+                        emp.departement?.libelle ||
+                        "—";
+
+                      return (
+                        <tr
+                          key={emp.id}
+                          className="transition hover:bg-[#e7ffff]/40"
+                        >
+
+                          {/* Employé */}
+                          <td className="px-5 py-4">
+                            <div className="flex items-center gap-3">
+
+                              <div className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-gradient-to-br from-[#3c0038] to-[#93003f] text-sm font-bold text-white">
+                                {(
+                                  prenom?.[0] ||
+                                  nom?.[0] ||
+                                  "?"
+                                ).toUpperCase()}
+                              </div>
+
+                              <div className="min-w-0">
+                                <p className="truncate text-sm font-semibold text-[#3c0038]">
+                                  {nomComplet ||
+                                    "Sans nom"}
+                                </p>
+
+                                <p className="truncate text-xs text-neutral-500">
+                                  {emp.email ||
+                                    "—"}
+                                </p>
+                              </div>
+                            </div>
+                          </td>
+
+                          {/* Rôle */}
+                          <td className="px-5 py-4">
+                            <span
+                              className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${role.chip}`}
+                            >
+                              {role.label}
+                            </span>
+                          </td>
+
+                          {/* Département */}
+                          <td className="px-5 py-4">
+                            <div className="flex items-center gap-2 text-sm text-neutral-700">
+                              <Icone
+                                d={I.batiment}
+                                className="h-4 w-4 text-neutral-400"
+                              />
+
+                              {departement}
+                            </div>
+                          </td>
+
+                          {/* Solde */}
+                          <td className="px-5 py-4">
+                            <div className="flex items-center gap-2">
+                              <Icone
+                                d={I.calendrier}
+                                className="h-4 w-4 text-[#0097ff]"
+                              />
+
+                              <span className="text-sm font-semibold text-neutral-700">
+                                {Number(
+                                  emp.solde_conge || 0
+                                )}
+                              </span>
+
+                              <span className="text-xs text-neutral-400">
+                                jours
+                              </span>
+                            </div>
+                          </td>
+
+                          {/* Statut */}
+                          <td className="px-5 py-4">
+                            {emp.is_active ? (
+                              <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-600">
+                                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                                Actif
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1.5 rounded-full bg-neutral-100 px-3 py-1 text-xs font-semibold text-neutral-500">
+                                <span className="h-1.5 w-1.5 rounded-full bg-neutral-400" />
+                                Inactif
+                              </span>
+                            )}
+                          </td>
+
+                          {/* Actions */}
+                          <td className="px-5 py-4">
+                            <div className="flex justify-end gap-2">
+
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  ouvrirFormulaire(emp)
+                                }
+                                className="grid h-9 w-9 place-items-center rounded-lg border border-[#0097ff]/20 text-[#0097ff] transition hover:bg-[#0097ff]/10"
+                                title="Modifier"
+                              >
+                                <Icone
+                                  d={I.crayon}
+                                />
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleSupprimer(
+                                    emp.id,
+                                    nomComplet
+                                  )
+                                }
+                                className="grid h-9 w-9 place-items-center rounded-lg border border-red-100 text-red-500 transition hover:bg-red-50"
+                                title="Supprimer"
+                              >
+                                <Icone
+                                  d={I.corbeille}
+                                />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+
+                </tbody>
+              </table>
             </div>
 
-            <label className="flex items-center gap-3 p-3 bg-neutral-50 rounded-xl border border-neutral-200 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={form.is_active}
-                onChange={(e) => setForm({ ...form, is_active: e.target.checked })}
-                className="accent-[#E91E8C] h-4 w-4 rounded"
-              />
-              <span className="text-xs font-bold text-neutral-800">
-                Compte actif (autoriser la connexion)
-              </span>
-            </label>
+            {/* Résultat */}
+            {!chargement &&
+              employesFiltres.length > 0 && (
+                <div className="border-t border-neutral-100 bg-neutral-50/50 px-5 py-3">
+                  <p className="text-xs text-neutral-500">
+                    {employesFiltres.length} employé
+                    {employesFiltres.length > 1
+                      ? "s"
+                      : ""}{" "}
+                    affiché
+                    {employesFiltres.length > 1
+                      ? "s"
+                      : ""}
+                  </p>
+                </div>
+              )}
+          </div>
+        </div>
+      </div>
 
-            <div className="flex gap-2 pt-2">
+      {/* ============================================================ */}
+      {/* MODAL AJOUT / MODIFICATION                                    */}
+      {/* ============================================================ */}
+
+      {formOuvert && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+
+          {/* Overlay */}
+          <div
+            className="absolute inset-0 bg-[#3c0038]/40 backdrop-blur-sm"
+            onClick={() => setFormOuvert(false)}
+          />
+
+          {/* Modal */}
+          <div className="relative z-10 max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-3xl bg-white shadow-2xl">
+
+            {/* Header modal */}
+            <div className="sticky top-0 z-10 flex items-center justify-between border-b border-neutral-100 bg-white px-6 py-5">
+
+              <div>
+                <h2 className="text-xl font-bold text-[#3c0038]">
+                  {empEnEdition
+                    ? "Modifier l'employé"
+                    : "Ajouter un employé"}
+                </h2>
+
+                <p className="mt-1 text-xs text-neutral-500">
+                  {empEnEdition
+                    ? "Modifiez les informations de cet utilisateur."
+                    : "Renseignez les informations du nouvel utilisateur."}
+                </p>
+              </div>
+
               <button
                 type="button"
                 onClick={() => setFormOuvert(false)}
-                className="flex-1 rounded-xl border border-neutral-300 py-2.5 text-sm font-semibold text-neutral-700 hover:bg-neutral-50"
+                className="grid h-9 w-9 place-items-center rounded-xl text-neutral-400 transition hover:bg-neutral-100 hover:text-[#3c0038]"
+                aria-label="Fermer"
               >
-                Annuler
-              </button>
-              <button
-                type="submit"
-                className="flex-1 rounded-xl bg-[#E91E8C] text-white py-2.5 text-sm font-semibold hover:bg-[#c81879]"
-              >
-                Enregistrer
+                <Icone d={I.croix} />
               </button>
             </div>
-          </form>
+
+            {/* Formulaire */}
+            <form
+              onSubmit={handleSubmit}
+              className="space-y-5 p-6"
+            >
+
+              {/* Nom / prénom */}
+              <div className="grid gap-4 sm:grid-cols-2">
+
+                <div>
+                  <label className={labelCls}>
+                    Prénom
+                  </label>
+
+                  <input
+                    type="text"
+                    value={form.first_name}
+                    onChange={(e) =>
+                      modifierChamp(
+                        "first_name",
+                        e.target.value
+                      )
+                    }
+                    className={champ}
+                    placeholder="Prénom"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className={labelCls}>
+                    Nom
+                  </label>
+
+                  <input
+                    type="text"
+                    value={form.last_name}
+                    onChange={(e) =>
+                      modifierChamp(
+                        "last_name",
+                        e.target.value
+                      )
+                    }
+                    className={champ}
+                    placeholder="Nom"
+                    required
+                  />
+                </div>
+              </div>
+
+              {/* Email */}
+              <div>
+                <label className={labelCls}>
+                  Adresse email
+                </label>
+
+                <input
+                  type="email"
+                  value={form.email}
+                  onChange={(e) =>
+                    modifierChamp(
+                      "email",
+                      e.target.value
+                    )
+                  }
+                  className={champ}
+                  placeholder="exemple@entreprise.com"
+                  required
+                />
+              </div>
+
+              {/* Mot de passe */}
+              <div>
+                <label className={labelCls}>
+                  Mot de passe
+                  {empEnEdition && (
+                    <span className="ml-1 font-normal text-neutral-400">
+                      (laisser vide pour conserver)
+                    </span>
+                  )}
+                </label>
+
+                <input
+                  type="password"
+                  value={form.password}
+                  onChange={(e) =>
+                    modifierChamp(
+                      "password",
+                      e.target.value
+                    )
+                  }
+                  className={champ}
+                  placeholder={
+                    empEnEdition
+                      ? "Nouveau mot de passe"
+                      : "Mot de passe"
+                  }
+                  required={!empEnEdition}
+                />
+              </div>
+
+              {/* Rôle / département */}
+              <div className="grid gap-4 sm:grid-cols-2">
+
+                <div>
+                  <label className={labelCls}>
+                    Rôle
+                  </label>
+
+                  <select
+                    value={form.role}
+                    onChange={(e) =>
+                      modifierChamp(
+                        "role",
+                        e.target.value
+                      )
+                    }
+                    className={champ}
+                  >
+                    {Object.entries(ROLES).map(
+                      ([key, value]) => (
+                        <option
+                          key={key}
+                          value={key}
+                        >
+                          {value.label}
+                        </option>
+                      )
+                    )}
+                  </select>
+                </div>
+
+                <div>
+                  <label className={labelCls}>
+                    Département
+                  </label>
+
+                  <select
+                    value={form.departement_id}
+                    onChange={(e) =>
+                      modifierChamp(
+                        "departement_id",
+                        e.target.value
+                      )
+                    }
+                    className={champ}
+                  >
+                    <option value="">
+                      Aucun département
+                    </option>
+
+                    {departements.map((dept) => (
+                      <option
+                        key={dept.id}
+                        value={dept.id}
+                      >
+                        {dept.nom ||
+                          dept.name ||
+                          dept.libelle}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Solde congé */}
+              <div>
+                <label className={labelCls}>
+                  Solde de congé
+                </label>
+
+                <div className="relative">
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.5"
+                    value={form.solde_conge}
+                    onChange={(e) =>
+                      modifierChamp(
+                        "solde_conge",
+                        e.target.value
+                      )
+                    }
+                    className={`${champ} pr-16`}
+                  />
+
+                  <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-xs text-neutral-400">
+                    jours
+                  </span>
+                </div>
+              </div>
+
+              {/* Actif */}
+              <div className="rounded-xl border border-neutral-100 bg-neutral-50 p-4">
+                <label className="flex cursor-pointer items-center justify-between gap-4">
+
+                  <div>
+                    <p className="text-sm font-semibold text-[#3c0038]">
+                      Compte actif
+                    </p>
+
+                    <p className="mt-1 text-xs text-neutral-500">
+                      L'utilisateur pourra se connecter à
+                      l'application.
+                    </p>
+                  </div>
+
+                  <input
+                    type="checkbox"
+                    checked={form.is_active}
+                    onChange={(e) =>
+                      modifierChamp(
+                        "is_active",
+                        e.target.checked
+                      )
+                    }
+                    className="h-5 w-5 rounded border-neutral-300 text-[#3c0038] focus:ring-[#0097ff]"
+                  />
+                </label>
+              </div>
+
+              {/* Boutons */}
+              <div className="flex flex-col-reverse gap-3 border-t border-neutral-100 pt-5 sm:flex-row sm:justify-end">
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    setFormOuvert(false)
+                  }
+                  className="rounded-xl border border-neutral-200 px-5 py-2.5 text-sm font-semibold text-neutral-600 transition hover:bg-neutral-50"
+                >
+                  Annuler
+                </button>
+
+                <button
+                  type="submit"
+                  className="rounded-xl bg-[#3c0038] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[#93003f]"
+                >
+                  {empEnEdition
+                    ? "Enregistrer les modifications"
+                    : "Ajouter l'employé"}
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
-    </Layout>
+    </MainLayout>
   );
 }

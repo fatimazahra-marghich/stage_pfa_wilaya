@@ -14,6 +14,8 @@ import PendingRequests from "./pages/chef/PendingRequests";
 import RequestDetail from "./pages/chef/RequestDetail";
 import TeamCalendar from "./pages/chef/TeamCalendar";
 import CorrectSolde from "./pages/chef/CorrectSolde";
+import DashboardChef from "./pages/chef/DashboardChef";
+import AgentHistorique from "./pages/chef/AgentHistorique";
 
 // Espace RH
 import GlobalBalances from "./pages/rh/GlobalBalances";
@@ -65,17 +67,19 @@ export default function App() {
           <Route path="/employe/historique" element={<ProtectedRoute rolesAutorises={["EMPLOYE"]}><History /></ProtectedRoute>} />
 
           {/* 👔 Espace Chef de service */}
-          <Route path="/chef" element={<ProtectedRoute rolesAutorises={["CHEF_SERVICE"]}><PendingRequests /></ProtectedRoute>} />
+          <Route path="/chef" element={<ProtectedRoute rolesAutorises={["CHEF_SERVICE"]}><DashboardChef /></ProtectedRoute>} />
           <Route path="/chef/demandes" element={<ProtectedRoute rolesAutorises={["CHEF_SERVICE"]}><PendingRequests /></ProtectedRoute>} />
           <Route path="/chef/demandes/:id" element={<ProtectedRoute rolesAutorises={["CHEF_SERVICE"]}><RequestDetail /></ProtectedRoute>} />
           <Route path="/chef/nouvelle-demande" element={<ProtectedRoute rolesAutorises={["CHEF_SERVICE"]}><NewRequest /></ProtectedRoute>} />
-          <Route path="/chef/historique" element={<ProtectedRoute rolesAutorises={["CHEF_SERVICE"]}><History /></ProtectedRoute>} />
           <Route path="/chef/calendrier" element={<ProtectedRoute rolesAutorises={["CHEF_SERVICE"]}><TeamCalendar /></ProtectedRoute>} />
+          <Route path="/chef/agents-historique" element={<ProtectedRoute rolesAutorises={["CHEF_SERVICE"]}><AgentHistorique /></ProtectedRoute>} />
+          <Route path="/chef/agents/:id/historique" element={<ProtectedRoute rolesAutorises={["CHEF_SERVICE"]}><AgentHistorique /></ProtectedRoute>} />
           <Route path="/chef/corriger-solde" element={<ProtectedRoute rolesAutorises={["CHEF_SERVICE"]}><CorrectSolde /></ProtectedRoute>} />
 
           {/* 🏢 Espace RH */}
           <Route path="/rh" element={<ProtectedRoute rolesAutorises={["RH", "ADMIN_RH"]}><GlobalBalances /></ProtectedRoute>} />
           <Route path="/rh/validation" element={<ProtectedRoute rolesAutorises={["RH", "ADMIN_RH"]}><RhPendingRequests /></ProtectedRoute>} />
+          <Route path="/rh/demandes/:id" element={<ProtectedRoute rolesAutorises={["RH", "ADMIN_RH"]}><RequestDetail /></ProtectedRoute>} />
           <Route path="/rh/nouvelle-demande" element={<ProtectedRoute rolesAutorises={["RH", "ADMIN_RH"]}><NewRequest /></ProtectedRoute>} />
           <Route path="/rh/historique" element={<ProtectedRoute rolesAutorises={["RH", "ADMIN_RH"]}><History /></ProtectedRoute>} />
           <Route path="/rh/planning" element={<ProtectedRoute rolesAutorises={["RH", "ADMIN_RH"]}><PlanningPage /></ProtectedRoute>} />

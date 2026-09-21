@@ -1,7 +1,7 @@
 
 import { useEffect, useState } from "react";
 import api from "../api/axios";
-import Layout from "../components/Layout";
+import MainLayout from "../components/MainLayout";
 
 /* Palette
    #3c0038 prune   #93003f bordeaux   #0097ff bleu
@@ -196,7 +196,7 @@ export default function ProfilPage() {
     "U";
 
   return (
-    <Layout>
+    <MainLayout>
       <div className="min-h-full">
         <div className="mx-auto max-w-5xl space-y-6">
           {/* Notification */}
@@ -478,6 +478,6 @@ export default function ProfilPage() {
           </div>
         </div>
       </div>
-    </Layout>
+    </MainLayout>
   );
 }

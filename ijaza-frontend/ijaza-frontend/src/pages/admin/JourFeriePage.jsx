@@ -1,4 +1,3 @@
-
 import { useEffect, useMemo, useRef, useState } from "react";
 import api from "../../api/axios";
 import MainLayout from "../../components/MainLayout";
@@ -174,55 +173,36 @@ export default function JourFeriePage() {
 
     return tousLesJoursFeries
       .filter((item) => {
-        if (
-          typeFiltre === "recurrents" &&
-          !item.est_recurrent
-        ) {
-          return false;
-        }
+        // 1. Filtre par type (Fixes / Ponctuels)
+        if (typeFiltre === "recurrents" && !item.est_recurrent) return false;
+        if (typeFiltre === "ponctuels" && item.est_recurrent) return false;
 
-        if (
-          typeFiltre === "ponctuels" &&
-          item.est_recurrent
-        ) {
-          return false;
-        }
+        // 2. Filtre par recherche de texte
+        const intitule = String(item.nom || item.libelle || "").toLowerCase();
+        if (!intitule.includes(terme)) return false;
 
-        if (!item.est_recurrent) {
-          const d = item.date_debut || item.date;
+        // 3. Filtre par année :
+        // Si c'est RÉCURRENT -> On l'affiche TOUJOURS (quelle que soit l'année)
+        if (item.est_recurrent) return true;
 
-          if (!d) return false;
-
-          if (
-            Number(d.split("-")[0]) !==
-            Number(anneeFiltre)
-          ) {
-            return false;
-          }
-        }
-
-        const intitule = String(
-          item.nom || item.libelle || ""
-        ).toLowerCase();
-
-        return intitule.includes(terme);
+        // Si c'est PONCTUEL -> On vérifie que c'est bien l'année sélectionnée
+        const d = item.date_debut || item.date;
+        if (!d) return false;
+        return Number(d.split("-")[0]) === Number(anneeFiltre);
       })
       .map((item) => {
-        const dDebut =
-          item.date_debut || item.date;
+        const dDebut = item.date_debut || item.date;
+        const dFin = item.date_fin || dDebut;
 
-        const dFin =
-          item.date_fin || dDebut;
+        // Pour les récurrents, on force l'affichage avec l'année en cours de visualisation
+        if (item.est_recurrent && dDebut) {
+          const moisJourDebut = dDebut.slice(5); // Extrait "MM-DD"
+          const moisJourFin = dFin ? dFin.slice(5) : moisJourDebut;
 
-        if (item.est_recurrent) {
           return {
             ...item,
-            date_debut_affiche: dDebut
-              ? `${anneeFiltre}-${dDebut.slice(5)}`
-              : "",
-            date_fin_affiche: dFin
-              ? `${anneeFiltre}-${dFin.slice(5)}`
-              : "",
+            date_debut_affiche: `${anneeFiltre}-${moisJourDebut}`,
+            date_fin_affiche: `${anneeFiltre}-${moisJourFin}`,
           };
         }
 
@@ -233,16 +213,9 @@ export default function JourFeriePage() {
         };
       })
       .sort((a, b) =>
-        String(a.date_debut_affiche).localeCompare(
-          String(b.date_debut_affiche)
-        )
+        String(a.date_debut_affiche).localeCompare(String(b.date_debut_affiche))
       );
-  }, [
-    tousLesJoursFeries,
-    anneeFiltre,
-    recherche,
-    typeFiltre,
-  ]);
+  }, [tousLesJoursFeries, anneeFiltre, recherche, typeFiltre]);
 
   const parMois = useMemo(() => {
     const groupes = new Map();
@@ -1555,4 +1528,3 @@ export default function JourFeriePage() {
     </MainLayout>
   );
 }
-

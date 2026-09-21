@@ -3,14 +3,11 @@ from rest_framework.routers import DefaultRouter
 from .views import UtilisateurViewSet, LoginView
 
 router = DefaultRouter()
-router.register(r'utilisateurs', UtilisateurViewSet, basename='utilisateur')
-# Alias de sécurité pour capturer les requêtes vers /api/users/fonctionnaires/
+router.register(r'', UtilisateurViewSet, basename='utilisateur')
+router.register(r'utilisateurs', UtilisateurViewSet, basename='utilisateurs_alias')
 router.register(r'fonctionnaires', UtilisateurViewSet, basename='fonctionnaire')
 
 urlpatterns = [
-    # Route pour la connexion par Email
     path('auth/login/', LoginView.as_view(), name='login'),
-    
-    # Routes générées par le Router (/utilisateurs/ et /fonctionnaires/)
     path('', include(router.urls)),
 ]

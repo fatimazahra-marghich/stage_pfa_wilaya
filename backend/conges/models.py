@@ -2,10 +2,17 @@ from django.db import models
 from django.conf import settings
 
 class TypeConge(models.Model):
+    code = models.CharField(max_length=50, unique=True, null=True, blank=True)
     libelle = models.CharField(max_length=100)
     description = models.TextField(blank=True)
-    duree_max_jours = models.PositiveIntegerField(default=22)
-    necessite_piece_jointe = models.BooleanField(default=False)
+    duree_max = models.PositiveIntegerField(default=22)
+    justificatif_requis = models.BooleanField(default=False)
+    type_justificatif = models.CharField(
+        max_length=200, 
+        blank=True, 
+        null=True, 
+        help_text="Ex: Certificat médical, Acte de naissance, Acte de mariage..."
+    )
 
     def __str__(self):
         return self.libelle
@@ -32,6 +39,7 @@ class JourFerie(models.Model):
     date_debut = models.DateField()
     date_fin = models.DateField()
     annee = models.IntegerField()
+    est_recurrent = models.BooleanField(default=False)
 
     def __str__(self):
         return f"{self.nom} ({self.date_debut} au {self.date_fin})"
@@ -44,6 +52,7 @@ class DemandeConge(models.Model):
         ('EN_ATTENTE_RH', 'En attente Administration RH'),
         ('REFUSEE_RH', 'Refusée par RH'),
         ('VALIDEE', 'Validée définitivement'),
+        ('ANNULEE', 'Annulée par l\'employé'),
     )
 
     utilisateur = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='demandes')
@@ -66,4 +75,14 @@ class EtapeValidation(models.Model):
     decision = models.CharField(max_length=20)
     commentaire = models.TextField(blank=True)
     date_decision = models.DateTimeField(auto_now_add=True)
-# Create your models here.
+class CorrectionSolde(models.Model):
+    utilisateur = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='corrections_recues')
+    solde_conge = models.ForeignKey(SoldeConge, on_delete=models.SET_NULL, null=True, blank=True, related_name='corrections')
+    annee = models.IntegerField()
+    nouveau_solde = models.FloatField()
+    motif = models.TextField()
+    cree_par = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, related_name='corrections_effectuees')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Correction #{self.id} - {self.utilisateur.username} ({self.nouveau_solde} j)"

@@ -1,10 +1,15 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "../../api/axios";
-import Layout from "../../components/Layout";
+import MainLayout from "../../components/MainLayout";
+import { Icone, I } from "../../components/icons";
 
 export default function NewRequest() {
   const [types, setTypes] = useState([]);
+  const [soldes, setSoldes] = useState(null);
+  const [demandesExistantes, setDemandesExistantes] = useState([]);
+  const [joursFeries, setJoursFeries] = useState([]);
+  
   const [form, setForm] = useState({
     type_conge: "",
     date_debut: "",
@@ -17,48 +22,156 @@ export default function NewRequest() {
   const navigate = useNavigate();
 
   useEffect(() => {
+    // 1. Chargement prioritaire des types de congé (isolé pour éviter tout blocage)
     api.get("/types-conge/")
-      .then(({ data }) => setTypes(Array.isArray(data) ? data : (data.results || [])))
-      .catch((err) => console.error("Erreur chargement types :", err));
+      .then((res) => {
+        const rawData = res.data;
+        const listeTypes = Array.isArray(rawData) ? rawData : (rawData?.results || []);
+        setTypes(listeTypes);
+      })
+      .catch((err) => {
+        console.error("Erreur sur /types-conge/ :", err.response || err);
+      });
+
+    // 2. Chargement des données secondaires (soldes, demandes, jours fériés)
+    api.get("/soldes/")
+      .then((res) => {
+        const raw = res.data;
+        const soldeExtrait = Array.isArray(raw) ? raw[0] : (raw?.results?.[0] ?? raw);
+        setSoldes(soldeExtrait ?? null);
+      })
+      .catch((err) => console.warn("Erreur /soldes/ :", err.response?.status));
+
+    api.get("/demandes/")
+      .then((res) => setDemandesExistantes(Array.isArray(res.data) ? res.data : (res.data?.results || [])))
+      .catch((err) => console.warn("Erreur /demandes/ :", err.response?.status));
+
+    api.get("/jours-feries/")
+      .then((res) => setJoursFeries(Array.isArray(res.data) ? res.data : (res.data?.results || [])))
+      .catch((err) => console.warn("Erreur /jours-feries/ :", err.response?.status));
   }, []);
 
   function update(champ, valeur) {
     setForm((f) => ({ ...f, [champ]: valeur }));
   }
 
+  const selectedTypeObj = types.find((t) => String(t.id) === String(form.type_conge));
+  const estMaladie =
+    selectedTypeObj?.code === "MALADIE_COURTE" ||
+    selectedTypeObj?.code === "MALADIE" ||
+    selectedTypeObj?.libelle?.toLowerCase().includes("maladie");
+
+  const necessitePiece = selectedTypeObj?.justificatif_requis || selectedTypeObj?.necessite_piece_jointe || estMaladie;
+
+  // Calcul dynamique du nombre de jours selon la règle RH
   const calculerNombreJours = () => {
     if (!form.date_debut || !form.date_fin) return 0;
-    const d1 = new Date(form.date_debut);
-    const d2 = new Date(form.date_fin);
-    if (d2 < d1) return 0;
-    const diffTime = Math.abs(d2 - d1);
-    return Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
+    
+    const [y1, m1, d1] = form.date_debut.split("-").map(Number);
+    const [y2, m2, d2] = form.date_fin.split("-").map(Number);
+
+    let curDate = new Date(y1, m1 - 1, d1);
+    const endDate = new Date(y2, m2 - 1, d2);
+
+    if (endDate < curDate) return 0;
+
+    const libelle = (selectedTypeObj?.libelle || selectedTypeObj?.nom || "").toLowerCase();
+    const estCongeAnnuel = libelle.includes("annuel") || libelle.includes("administratif");
+
+    if (!estCongeAnnuel) {
+      const diffTime = endDate.getTime() - curDate.getTime();
+      return Math.round(diffTime / (1000 * 3600 * 24)) + 1;
+    }
+
+    let count = 0;
+    while (curDate <= endDate) {
+      const day = curDate.getDay();
+      const isWeekend = day === 0 || day === 6;
+
+      const isoDate = `${curDate.getFullYear()}-${String(curDate.getMonth() + 1).padStart(2, "0")}-${String(curDate.getDate()).padStart(2, "0")}`;
+
+      const isFerie = joursFeries.some((f) => {
+        const dDebut = f.date_debut || f.date;
+        const dFin = f.date_fin || dDebut;
+
+        if (f.est_recurrent) {
+          const mmdd = isoDate.slice(5);
+          return mmdd >= dDebut.slice(5) && mmdd <= dFin.slice(5);
+        }
+        return isoDate >= dDebut && isoDate <= dFin;
+      });
+
+      if (!isWeekend && !isFerie) {
+        count++;
+      }
+
+      curDate.setDate(curDate.getDate() + 1);
+    }
+    return count;
   };
 
   const nbJours = calculerNombreJours();
-  const selectedTypeObj = types.find((t) => t.id === parseInt(form.type_conge, 10));
+
+  const verifierChevauchement = (debut, fin) => {
+    const dNouveauDebut = new Date(debut);
+    const dNouveauFin = new Date(fin);
+
+    return demandesExistantes.some((d) => {
+      const statutUpper = (d.statut || "").toUpperCase();
+
+      if (
+        statutUpper.startsWith("REFUSE") || 
+        statutUpper.startsWith("ANNUL") || 
+        statutUpper === "CANCELED"
+      ) {
+        return false;
+      }
+
+      const dExisteDebut = new Date(d.date_debut);
+      const dExisteFin = new Date(d.date_fin);
+
+      return dNouveauDebut <= dExisteFin && dNouveauFin >= dExisteDebut;
+    });
+  };
 
   async function handleSubmit(e) {
     e.preventDefault();
     setErreur("");
+
+    const aujourdhui = new Date().toISOString().split("T")[0];
 
     if (!form.type_conge) {
       setErreur("Veuillez sélectionner un type de congé.");
       return;
     }
 
-    if (nbJours <= 0) {
+    if (new Date(form.date_fin) < new Date(form.date_debut)) {
       setErreur("La date de fin doit être égale ou supérieure à la date de début.");
       return;
     }
 
-    if (selectedTypeObj?.necessite_piece_jointe && !pieceJointe) {
-      setErreur("Une pièce jointe (justificatif) est obligatoire pour ce type de congé.");
+    if (!estMaladie && form.date_debut < aujourdhui) {
+      setErreur("Vous ne pouvez pas poser une demande de congé sur une date déjà passée.");
+      return;
+    }
+
+    if (verifierChevauchement(form.date_debut, form.date_fin)) {
+      setErreur("Vous avez déjà une demande en cours ou validée qui chevauche ces dates.");
+      return;
+    }
+
+    const soldeDisponible = soldes ? soldes.solde_actuel : 0;
+    if (!estMaladie && selectedTypeObj?.décompte_solde !== false && nbJours > soldeDisponible) {
+      setErreur(`Solde insuffisant. Vous demandez ${nbJours} jour(s) alors que votre solde disponible est de ${soldeDisponible} jour(s).`);
+      return;
+    }
+
+    if (necessitePiece && !pieceJointe) {
+      setErreur("Un justificatif (certificat médical ou autre pièce) est obligatoire pour ce type de congé.");
       return;
     }
 
     setEnvoi(true);
-
     try {
       const formData = new FormData();
       formData.append("type_conge", parseInt(form.type_conge, 10));
@@ -66,7 +179,14 @@ export default function NewRequest() {
       formData.append("date_fin", form.date_fin);
       formData.append("nombre_jours", nbJours);
       formData.append("motif", form.motif);
-      
+
+      if (estMaladie) {
+        formData.append("auto_valide", "true");
+        if (nbJours > 4) {
+          formData.append("alerte_contre_visite", "true");
+        }
+      }
+
       if (pieceJointe instanceof File) {
         formData.append("piece_jointe", pieceJointe);
       }
@@ -78,7 +198,6 @@ export default function NewRequest() {
       navigate("/employe");
     } catch (err) {
       console.error("Détails de l'erreur :", err.response?.data || err);
-      
       const backendError = err.response?.data;
       if (typeof backendError === "object" && backendError !== null) {
         const messages = Object.entries(backendError)
@@ -86,104 +205,190 @@ export default function NewRequest() {
           .join(" | ");
         setErreur(messages);
       } else {
-        setErreur("Impossible d'envoyer la demande. Vérifie les champs et réessaie.");
+        setErreur("Impossible d'envoyer la demande. Vérifiez vos données et réessayez.");
       }
     } finally {
       setEnvoi(false);
     }
   }
 
-  return (
-    <Layout>
-      <div className="max-w-xl">
-        <h1 className="text-3xl font-bold mb-1">Nouvelle demande</h1>
-        <p className="text-neutral-500 mb-8">Ça prend 30 secondes.</p>
+  const champ =
+    "w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-[#3c0038] outline-none transition-colors placeholder:text-slate-400 focus:border-[#0097ff] focus:ring-2 focus:ring-[#00efff]/40";
+  const label =
+    "mb-1.5 block text-xs font-bold uppercase tracking-wider text-[#0097ff]";
 
-        <form onSubmit={handleSubmit} className="space-y-6">
+  return (
+    <MainLayout>
+      <div className="mx-auto max-w-2xl space-y-6">
+        <header className="rounded-2xl border border-[#00efff]/30 bg-white p-6 shadow-sm">
+          <h1 className="text-2xl font-bold tracking-tight text-[#3c0038]">
+            Nouvelle demande d'absence
+          </h1>
+          <p className="mt-1 text-sm text-slate-500">
+            Saisissez votre demande. Les contrôles de dates et de soldes sont effectués automatiquement.
+          </p>
+        </header>
+
+        <form
+          onSubmit={handleSubmit}
+          className="space-y-6 rounded-2xl border border-[#00efff]/30 bg-white p-6 shadow-sm sm:p-8"
+        >
           {/* 1. Type de congé */}
           <div>
-            <label className="block text-sm font-semibold mb-2">1. Type de congé</label>
+            <label className={label}>1. Type de congé</label>
             <select
               value={form.type_conge}
               onChange={(e) => update("type_conge", e.target.value)}
               required
-              className="w-full rounded-xl border border-neutral-300 px-4 py-3 text-sm outline-none focus:border-[#E91E8C] focus:ring-2 focus:ring-[#E91E8C]/20"
+              className={champ}
             >
               <option value="">Sélectionnez un type</option>
-              {types.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.libelle}
-                </option>
-              ))}
+              {types && types.length > 0 ? (
+                types.map((t) => (
+                  <option key={t.id} value={String(t.id)}>
+                    {t.libelle || t.nom || t.nom_type || t.intitule || `Type ${t.id}`}
+                  </option>
+                ))
+              ) : (
+                <option value="" disabled>Aucun type disponible</option>
+              )}
             </select>
           </div>
 
+          {/* INFORMATION DYNAMIQUE DU TYPE DE CONGÉ SELECTIONNÉ */}
+          {selectedTypeObj && (
+            <div className="rounded-xl border border-[#00efff]/30 bg-[#e7ffff]/30 p-4 text-xs space-y-1.5">
+              <p className="font-bold text-[#0097ff] flex items-center gap-1.5">
+                <Icone d={I.etincelle} className="h-4 w-4" />
+                Règles applicables pour ce motif :
+              </p>
+              <div className="grid grid-cols-2 gap-2 text-[#3c0038] pt-1">
+                <div>
+                  <span className="text-slate-400 block font-semibold">Durée maximale autorisée :</span>
+                  <span className="font-bold">{selectedTypeObj.duree_max ? `${selectedTypeObj.duree_max} jour(s)` : "Non définie"}</span>
+                </div>
+                <div>
+                  <span className="text-slate-400 block font-semibold">Document justificatif :</span>
+                  <span className="font-bold">
+                    {selectedTypeObj.type_justificatif || (necessitePiece ? "Justificatif obligatoire" : "Non requis")}
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Bannière d'information maladie */}
+          {estMaladie && (
+            <div className="space-y-1 rounded-xl border border-[#0097ff]/30 bg-[#e7ffff]/50 p-4">
+              <p className="flex items-center gap-1.5 text-xs font-bold text-[#0097ff]">
+                <Icone d={I.etincelle} className="h-4 w-4" />
+                Congé maladie : Traitement automatisé
+              </p>
+              <p className="text-xs leading-relaxed text-[#3c0038]">
+                Ce congé sera automatiquement validé. Un certificat médical est obligatoire.
+                {nbJours > 4 && (
+                  <span className="mt-1 flex items-start gap-1.5 font-bold text-[#93003f]">
+                    <Icone d={I.alerte} className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                    Durée de {nbJours} jours (&gt; 4 jours) : Une alerte pour contre-visite médicale sera transmise au service RH.
+                  </span>
+                )}
+              </p>
+            </div>
+          )}
+
           {/* 2. Dates */}
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <div>
-              <label className="block text-sm font-semibold mb-2">2. Date de début</label>
+              <label className={label}>2. Date de début</label>
               <input
                 type="date"
                 value={form.date_debut}
                 onChange={(e) => update("date_debut", e.target.value)}
                 required
-                className="w-full rounded-xl border border-neutral-300 px-4 py-3 text-sm outline-none focus:border-[#E91E8C] focus:ring-2 focus:ring-[#E91E8C]/20"
+                className={champ}
               />
             </div>
             <div>
-              <label className="block text-sm font-semibold mb-2">Date de fin</label>
+              <label className={label}>Date de fin</label>
               <input
                 type="date"
                 value={form.date_fin}
                 onChange={(e) => update("date_fin", e.target.value)}
                 required
-                className="w-full rounded-xl border border-neutral-300 px-4 py-3 text-sm outline-none focus:border-[#E91E8C] focus:ring-2 focus:ring-[#E91E8C]/20"
+                className={champ}
               />
             </div>
           </div>
 
-          {nbJours > 0 && (
-            <p className="text-xs font-semibold text-[#E91E8C]">
-              Durée estimée : {nbJours} jour{nbJours > 1 ? "s" : ""}
-            </p>
+          {/* Récapitulatif durée */}
+          {nbJours >= 0 && form.date_debut && form.date_fin && (
+            <div className="flex items-center justify-between rounded-xl border border-[#00efff]/30 bg-[#e7ffff]/40 px-4 py-3 text-xs">
+              <span className="flex items-center gap-1.5 font-semibold text-slate-600">
+                <Icone d={I.horloge} className="h-4 w-4 text-[#0097ff]" />
+                Durée calculée
+              </span>
+              <span className="text-sm font-bold text-[#93003f]">
+                {nbJours} jour{nbJours > 1 ? "s" : ""}
+              </span>
+            </div>
           )}
 
           {/* 3. Motif */}
           <div>
-            <label className="block text-sm font-semibold mb-2">3. Motif</label>
+            <label className={label}>3. Motif</label>
             <textarea
               value={form.motif}
               onChange={(e) => update("motif", e.target.value)}
               rows={3}
               required
-              placeholder="Description brève de la demande..."
-              className="w-full rounded-xl border border-neutral-300 px-4 py-3 text-sm outline-none focus:border-[#E91E8C] focus:ring-2 focus:ring-[#E91E8C]/20"
+              placeholder="Précisez le motif de votre absence..."
+              className={champ}
             />
           </div>
 
           {/* 4. Pièce jointe */}
           <div>
-            <label className="block text-sm font-semibold mb-2">
-              4. Pièce jointe {selectedTypeObj?.necessite_piece_jointe && <span className="text-red-500">*</span>}
+            <label className={label}>
+              4. Pièce jointe{" "}
+              {necessitePiece && <span className="text-[#93003f]">* obligatoire</span>}
             </label>
-            <input
-              type="file"
-              onChange={(e) => setPieceJointe(e.target.files[0] || null)}
-              className="w-full text-sm text-neutral-500 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-[#E91E8C]/10 file:text-[#E91E8C] hover:file:bg-[#E91E8C]/20"
-            />
+            <div className="rounded-xl border-2 border-dashed border-[#00efff]/50 bg-[#e7ffff]/30 p-5 text-center transition-colors hover:border-[#0097ff]">
+              <input
+                type="file"
+                id="file-input"
+                onChange={(e) => setPieceJointe(e.target.files[0] || null)}
+                className="hidden"
+              />
+              <label htmlFor="file-input" className="block cursor-pointer space-y-2">
+                <span className="mx-auto grid h-11 w-11 place-items-center rounded-full bg-white text-[#0097ff] shadow-sm">
+                  <Icone d={pieceJointe ? I.document : I.televerser} className="h-5 w-5" />
+                </span>
+                <span className="block text-xs font-bold text-[#3c0038]">
+                  {pieceJointe ? pieceJointe.name : "Cliquez pour téléverser le document"}
+                </span>
+                <span className="block text-[10px] text-slate-400">
+                  Formats acceptés : PDF, PNG, JPG (max 5 Mo)
+                </span>
+              </label>
+            </div>
           </div>
 
-          {erreur && <p className="text-sm text-red-600 bg-red-50 p-3 rounded-lg border border-red-200">{erreur}</p>}
+          {erreur && (
+            <div className="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 p-4 text-xs font-semibold text-rose-700">
+              <Icone d={I.alerte} className="mt-0.5 h-4 w-4 shrink-0" />
+              {erreur}
+            </div>
+          )}
 
           <button
             type="submit"
             disabled={envoi}
-            className="w-full rounded-xl bg-[#E91E8C] text-white font-semibold py-3 hover:bg-[#c81879] transition-colors disabled:opacity-50"
+            className="w-full rounded-xl bg-[#93003f] py-3.5 text-sm font-bold text-white shadow-sm transition-colors hover:bg-[#3c0038] disabled:opacity-50"
           >
-            {envoi ? "Envoi..." : "Envoyer la demande"}
+            {envoi ? "Validation et envoi..." : "Soumettre la demande"}
           </button>
         </form>
       </div>
-    </Layout>
+    </MainLayout>
   );
 }

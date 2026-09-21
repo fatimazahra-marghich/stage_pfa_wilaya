@@ -1,56 +1,253 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import api from "../../api/axios";
-import Layout from "../../components/Layout";
+import MainLayout from "../../components/MainLayout";
 import StatutBadge from "../../components/StatutBadge";
+import { Icone, I } from "../../components/icons";
+
+const FILTRES = [
+  { cle: "TOUT", texte: "Tous" },
+  { cle: "EN_ATTENTE_CHEF", texte: "En attente" },
+  { cle: "VALIDEE", texte: "Validés" },
+  { cle: "REFUSEE", texte: "Refusés" },
+];
 
 export default function History() {
   const [demandes, setDemandes] = useState([]);
+  const [filtre, setFiltre] = useState("TOUT");
+  const [chargement, setChargement] = useState(true);
+  const [erreur, setErreur] = useState(null);
+  const [actionEnCours, setActionEnCours] = useState(null);
+
+  const chargerDemandes = async () => {
+    setChargement(true);
+    setErreur(null);
+
+    try {
+      // 1. Récupérer l'ID de l'utilisateur actuellement connecté
+      // (Essayez /users/me/ ou /me/ selon votre backend, sinon on utilise le profil)
+      let currentUserId = null;
+      try {
+        const userRes = await api.get("/users/me/");
+        currentUserId = userRes.data?.id;
+      } catch (e) {
+        // Si la route /users/me/ n'existe pas, on tente de lire le localStorage
+        const storedUser = JSON.parse(localStorage.getItem("user") || "{}");
+        currentUserId = storedUser?.id;
+      }
+
+      // 2. Récupérer l'ensemble des demandes
+      const { data } = await api.get("/demandes/");
+      const list = Array.isArray(data) ? data : data?.results || [];
+
+      // 3. FILTRAGE : Garder uniquement les demandes de l'utilisateur connecté
+      if (currentUserId) {
+        const mesDemandes = list.filter((item) => {
+          const idProprio = item.utilisateur_details?.id || item.utilisateur?.id || item.utilisateur;
+          return String(idProprio) === String(currentUserId);
+        });
+        setDemandes(mesDemandes);
+      } else {
+        setDemandes(list);
+      }
+    } catch (err) {
+      console.error("Erreur de chargement de l'historique :", err);
+      setErreur("Impossible de charger votre historique. Réessayez dans un instant.");
+    } finally {
+      setChargement(false);
+    }
+  };
 
   useEffect(() => {
-    api.get("/demandes/").then(({ data }) => setDemandes(data.results ?? data));
+    chargerDemandes();
   }, []);
 
-  return (
-    <Layout>
-      <h1 className="text-3xl font-bold mb-1">Historique des demandes</h1>
-      <p className="text-neutral-500 mb-8">Relevé détaillé de vos congés et absences.</p>
+  const annulerDemande = async (id) => {
+    if (!window.confirm("Êtes-vous sûr de vouloir annuler cette demande ?")) return;
 
-      <div className="rounded-2xl border border-black/10 bg-white shadow-sm overflow-hidden">
-        <table className="w-full text-sm">
-          <thead className="bg-neutral-50 text-left text-xs text-neutral-500 uppercase">
-            <tr>
-              <th className="px-6 py-4">Type de demande</th>
-              <th className="px-6 py-4">Période</th>
-              <th className="px-6 py-4">Jours décomptés</th>
-              <th className="px-6 py-4">Statut</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-black/5">
-            {demandes.map((d) => (
-              <tr key={d.id}>
-                <td className="px-6 py-4">
-                  <p className="font-semibold">{d.type_conge_libelle}</p>
-                  <p className="text-xs text-neutral-400">REF: #{d.id}</p>
-                </td>
-                <td className="px-6 py-4 text-neutral-600">
-                  {d.date_debut} — {d.date_fin}
-                </td>
-                <td className="px-6 py-4 text-neutral-600">{d.nombre_jours} jours</td>
-                <td className="px-6 py-4">
-                  <StatutBadge statut={d.statut} />
-                </td>
-              </tr>
+    setActionEnCours(id);
+    try {
+      await api.patch(`/demandes/${id}/annuler/`);
+      chargerDemandes();
+    } catch (err) {
+      alert(err.response?.data?.error || "Erreur lors de l'annulation de la demande.");
+    } finally {
+      setActionEnCours(null);
+    }
+  };
+
+  const demandesFiltrees = useMemo(
+    () =>
+      demandes.filter((d) => {
+        if (filtre === "TOUT") return true;
+        if (filtre === "EN_ATTENTE_CHEF") return d.statut?.startsWith("EN_ATTENTE");
+        if (filtre === "REFUSEE") return d.statut?.startsWith("REFUSEE");
+        return d.statut === filtre || (filtre === "VALIDEE" && d.statut === "VALIDE");
+      }),
+    [demandes, filtre]
+  );
+
+  const compteur = useMemo(
+    () =>
+      FILTRES.reduce((acc, f) => {
+        acc[f.cle] =
+          f.cle === "TOUT"
+            ? demandes.length
+            : f.cle === "EN_ATTENTE_CHEF"
+            ? demandes.filter((d) => d.statut?.startsWith("EN_ATTENTE")).length
+            : f.cle === "REFUSEE"
+            ? demandes.filter((d) => d.statut?.startsWith("REFUSEE")).length
+            : demandes.filter((d) => d.statut === f.cle || (f.cle === "VALIDEE" && d.statut === "VALIDE")).length;
+        return acc;
+      }, {}),
+    [demandes]
+  );
+
+  return (
+    <MainLayout>
+      <div className="mx-auto max-w-7xl space-y-6">
+        {/* En-tête */}
+        <header className="flex flex-col gap-4 rounded-2xl border border-[#00efff]/30 bg-white p-6 shadow-sm md:flex-row md:items-center md:justify-between">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight text-[#3c0038]">
+              Historique des demandes
+            </h1>
+            <p className="mt-1 text-sm text-slate-500">
+              Relevé détaillé et statut de l'ensemble de vos congés et absences.
+            </p>
+          </div>
+
+          {/* Filtres */}
+          <div className="flex flex-wrap gap-1 rounded-xl border border-slate-200 bg-white p-1">
+            {FILTRES.map((f) => (
+              <button
+                key={f.cle}
+                type="button"
+                onClick={() => setFiltre(f.cle)}
+                aria-pressed={filtre === f.cle}
+                className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${
+                  filtre === f.cle
+                    ? "bg-[#3c0038] text-white"
+                    : "text-slate-500 hover:bg-[#e7ffff] hover:text-[#3c0038]"
+                }`}
+              >
+                {f.texte}
+                <span
+                  className={`rounded-full px-1.5 text-[10px] tabular-nums ${
+                    filtre === f.cle
+                      ? "bg-white/20 text-white"
+                      : "bg-[#e7ffff] text-[#0097ff]"
+                  }`}
+                >
+                  {compteur[f.cle] ?? 0}
+                </span>
+              </button>
             ))}
-            {demandes.length === 0 && (
-              <tr>
-                <td colSpan={4} className="px-6 py-8 text-center text-neutral-400">
-                  Aucune demande enregistrée.
-                </td>
+          </div>
+        </header>
+
+        {/* Tableau */}
+        <div className="overflow-hidden rounded-2xl border border-[#00efff]/30 bg-white shadow-sm">
+          <table className="w-full border-collapse text-left text-sm">
+            <thead>
+              <tr className="border-b border-[#00efff]/30 bg-[#e7ffff]/40 text-[11px] font-extrabold uppercase tracking-wider text-[#0097ff]">
+                <th className="px-6 py-4">Réf &amp; Type</th>
+                <th className="px-6 py-4">Période</th>
+                <th className="px-6 py-4">Durée</th>
+                <th className="px-6 py-4">Justificatif</th>
+                <th className="px-6 py-4">Statut</th>
+                <th className="px-6 py-4 text-right">Actions</th>
               </tr>
-            )}
-          </tbody>
-        </table>
+            </thead>
+            <tbody className="divide-y divide-[#00efff]/20 font-medium">
+              {chargement ? (
+                [0, 1, 2].map((i) => (
+                  <tr key={i}>
+                    <td colSpan={6} className="px-6 py-5">
+                      <div className="h-4 w-2/3 animate-pulse rounded bg-[#e7ffff]" />
+                    </td>
+                  </tr>
+                ))
+              ) : erreur ? (
+                <tr>
+                  <td colSpan={6} className="px-6 py-8 text-center">
+                    <span className="inline-flex items-center gap-2 text-sm font-semibold text-rose-600">
+                      <Icone d={I.alerte} className="h-4 w-4" />
+                      {erreur}
+                    </span>
+                  </td>
+                </tr>
+              ) : demandesFiltrees.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="px-6 py-12 text-center">
+                    <span className="mx-auto grid h-12 w-12 place-items-center rounded-full bg-[#e7ffff] text-[#0097ff]">
+                      <Icone d={I.calendrier} className="h-5 w-5" />
+                    </span>
+                    <p className="mt-4 text-sm text-slate-500">
+                      {filtre === "TOUT"
+                        ? "Aucune demande enregistrée dans votre historique."
+                        : "Aucune demande ne correspond à ce filtre."}
+                    </p>
+                  </td>
+                </tr>
+              ) : (
+                demandesFiltrees.map((d) => (
+                  <tr
+                    key={d.id}
+                    className="transition-colors hover:bg-[#e7ffff]/40"
+                  >
+                    <td className="px-6 py-4">
+                      <p className="font-bold text-[#3c0038]">{d.type_conge_libelle}</p>
+                      <p className="mt-0.5 font-mono text-[10px] text-slate-400">
+                        REF #{d.id}
+                      </p>
+                    </td>
+                    <td className="px-6 py-4 text-xs text-slate-600">
+                      Du{" "}
+                      <span className="font-semibold text-[#3c0038]">{d.date_debut}</span>{" "}
+                      au <span className="font-semibold text-[#3c0038]">{d.date_fin}</span>
+                    </td>
+                    <td className="px-6 py-4">
+                      <span className="inline-flex items-center rounded-lg bg-[#e7ffff] px-2.5 py-1 text-xs font-bold text-[#93003f]">
+                        {d.nombre_jours} jour{d.nombre_jours > 1 ? "s" : ""}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4">
+                      {d.piece_jointe ? (
+                        <a
+                          href={d.piece_jointe}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#0097ff] hover:underline"
+                        >
+                          <Icone d={I.document} className="h-4 w-4" />
+                          Consulter
+                        </a>
+                      ) : (
+                        <span className="text-xs text-slate-300">—</span>
+                      )}
+                    </td>
+                    <td className="px-6 py-4">
+                      <StatutBadge statut={d.statut} />
+                    </td>
+                    <td className="px-6 py-4 text-right">
+                      {(d.statut === "EN_ATTENTE_CHEF" || d.statut === "EN_ATTENTE_SANTE") && (
+                        <button
+                          type="button"
+                          onClick={() => annulerDemande(d.id)}
+                          disabled={actionEnCours === d.id}
+                          className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-bold text-rose-700 hover:bg-rose-100 disabled:opacity-50"
+                        >
+                          {actionEnCours === d.id ? "Annulation..." : "Annuler"}
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
-    </Layout>
+    </MainLayout>
   );
 }

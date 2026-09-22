@@ -41,6 +41,10 @@ export default function RequestDetail() {
     async function charger() {
       try {
         const { data: d } = await api.get(`/demandes/${id}/`);
+        if (Number(d.nombre_jours) <= 0) {
+        setErreur("Cette demande est invalide (durée de 0 jour).");
+        return;
+      }
         setDemande(d);
 
         // Récupérer les demandes de l'équipe pour vérifier les chevauchements

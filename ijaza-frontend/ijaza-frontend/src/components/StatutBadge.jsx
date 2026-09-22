@@ -15,12 +15,13 @@ const STATUTS = {
     classe: "border border-[#00efff] bg-[#e7ffff] text-[#0097ff]",
     pastille: "bg-[#0097ff]",
   },
-  EN_ATTENTE_CONSEIL_SANTE: {
-    label: "En attente du conseil de santé",
-    court: "Conseil de santé",
-    classe: "border border-[#0097ff]/40 bg-[#0097ff]/10 text-[#0097ff]",
-    pastille: "bg-[#0097ff]",
+  EN_ATTENTE_SANTE: {
+    label: "En attente validation médicale (RH)",
+    court: "Validation médicale (RH)",
+    classe: "border border-[#8892f4] bg-[#d0daff] text-[#886787]",
+    pastille: "bg-[#332d40]",
   },
+  
   EN_ATTENTE_RH: {
     label: "En attente des ressources humaines",
     court: "Ressources humaines",

@@ -6,7 +6,7 @@ import { Icone, I } from "../../components/icons";
 
 const FILTRES = [
   { cle: "TOUT", texte: "Tous" },
-  { cle: "EN_ATTENTE_CHEF", texte: "En attente" },
+  { cle: "EN_ATTENTE", texte: "En attente" },
   { cle: "VALIDEE", texte: "Validés" },
   { cle: "REFUSEE", texte: "Refusés" },
 ];
@@ -23,32 +23,9 @@ export default function History() {
     setErreur(null);
 
     try {
-      // 1. Récupérer l'ID de l'utilisateur actuellement connecté
-      // (Essayez /users/me/ ou /me/ selon votre backend, sinon on utilise le profil)
-      let currentUserId = null;
-      try {
-        const userRes = await api.get("/users/me/");
-        currentUserId = userRes.data?.id;
-      } catch (e) {
-        // Si la route /users/me/ n'existe pas, on tente de lire le localStorage
-        const storedUser = JSON.parse(localStorage.getItem("user") || "{}");
-        currentUserId = storedUser?.id;
-      }
-
-      // 2. Récupérer l'ensemble des demandes
-      const { data } = await api.get("/demandes/");
+      const { data } = await api.get("/demandes/mes-demandes/");
       const list = Array.isArray(data) ? data : data?.results || [];
-
-      // 3. FILTRAGE : Garder uniquement les demandes de l'utilisateur connecté
-      if (currentUserId) {
-        const mesDemandes = list.filter((item) => {
-          const idProprio = item.utilisateur_details?.id || item.utilisateur?.id || item.utilisateur;
-          return String(idProprio) === String(currentUserId);
-        });
-        setDemandes(mesDemandes);
-      } else {
-        setDemandes(list);
-      }
+      setDemandes(list);
     } catch (err) {
       console.error("Erreur de chargement de l'historique :", err);
       setErreur("Impossible de charger votre historique. Réessayez dans un instant.");
@@ -67,7 +44,7 @@ export default function History() {
     setActionEnCours(id);
     try {
       await api.patch(`/demandes/${id}/annuler/`);
-      chargerDemandes();
+      await chargerDemandes();
     } catch (err) {
       alert(err.response?.data?.error || "Erreur lors de l'annulation de la demande.");
     } finally {
@@ -78,10 +55,12 @@ export default function History() {
   const demandesFiltrees = useMemo(
     () =>
       demandes.filter((d) => {
+        const statut = String(d.statut || "").toUpperCase();
         if (filtre === "TOUT") return true;
-        if (filtre === "EN_ATTENTE_CHEF") return d.statut?.startsWith("EN_ATTENTE");
-        if (filtre === "REFUSEE") return d.statut?.startsWith("REFUSEE");
-        return d.statut === filtre || (filtre === "VALIDEE" && d.statut === "VALIDE");
+        if (filtre === "EN_ATTENTE") return statut.startsWith("EN_ATTENTE");
+        if (filtre === "REFUSEE") return statut.startsWith("REFUSEE") || statut === "REFUSE";
+        if (filtre === "VALIDEE") return statut === "VALIDEE" || statut === "VALIDE";
+        return d.statut === filtre;
       }),
     [demandes, filtre]
   );
@@ -89,14 +68,14 @@ export default function History() {
   const compteur = useMemo(
     () =>
       FILTRES.reduce((acc, f) => {
-        acc[f.cle] =
-          f.cle === "TOUT"
-            ? demandes.length
-            : f.cle === "EN_ATTENTE_CHEF"
-            ? demandes.filter((d) => d.statut?.startsWith("EN_ATTENTE")).length
-            : f.cle === "REFUSEE"
-            ? demandes.filter((d) => d.statut?.startsWith("REFUSEE")).length
-            : demandes.filter((d) => d.statut === f.cle || (f.cle === "VALIDEE" && d.statut === "VALIDE")).length;
+        acc[f.cle] = demandes.filter((d) => {
+          const statut = String(d.statut || "").toUpperCase();
+          if (f.cle === "TOUT") return true;
+          if (f.cle === "EN_ATTENTE") return statut.startsWith("EN_ATTENTE");
+          if (f.cle === "REFUSEE") return statut.startsWith("REFUSEE") || statut === "REFUSE";
+          if (f.cle === "VALIDEE") return statut === "VALIDEE" || statut === "VALIDE";
+          return d.statut === f.cle;
+        }).length;
         return acc;
       }, {}),
     [demandes]
@@ -105,7 +84,6 @@ export default function History() {
   return (
     <MainLayout>
       <div className="mx-auto max-w-7xl space-y-6">
-        {/* En-tête */}
         <header className="flex flex-col gap-4 rounded-2xl border border-[#00efff]/30 bg-white p-6 shadow-sm md:flex-row md:items-center md:justify-between">
           <div>
             <h1 className="text-2xl font-bold tracking-tight text-[#3c0038]">
@@ -116,7 +94,6 @@ export default function History() {
             </p>
           </div>
 
-          {/* Filtres */}
           <div className="flex flex-wrap gap-1 rounded-xl border border-slate-200 bg-white p-1">
             {FILTRES.map((f) => (
               <button
@@ -145,7 +122,6 @@ export default function History() {
           </div>
         </header>
 
-        {/* Tableau */}
         <div className="overflow-hidden rounded-2xl border border-[#00efff]/30 bg-white shadow-sm">
           <table className="w-full border-collapse text-left text-sm">
             <thead>
@@ -190,59 +166,71 @@ export default function History() {
                   </td>
                 </tr>
               ) : (
-                demandesFiltrees.map((d) => (
-                  <tr
-                    key={d.id}
-                    className="transition-colors hover:bg-[#e7ffff]/40"
-                  >
-                    <td className="px-6 py-4">
-                      <p className="font-bold text-[#3c0038]">{d.type_conge_libelle}</p>
-                      <p className="mt-0.5 font-mono text-[10px] text-slate-400">
-                        REF #{d.id}
-                      </p>
-                    </td>
-                    <td className="px-6 py-4 text-xs text-slate-600">
-                      Du{" "}
-                      <span className="font-semibold text-[#3c0038]">{d.date_debut}</span>{" "}
-                      au <span className="font-semibold text-[#3c0038]">{d.date_fin}</span>
-                    </td>
-                    <td className="px-6 py-4">
-                      <span className="inline-flex items-center rounded-lg bg-[#e7ffff] px-2.5 py-1 text-xs font-bold text-[#93003f]">
-                        {d.nombre_jours} jour{d.nombre_jours > 1 ? "s" : ""}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4">
-                      {d.piece_jointe ? (
-                        <a
-                          href={d.piece_jointe}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#0097ff] hover:underline"
-                        >
-                          <Icone d={I.document} className="h-4 w-4" />
-                          Consulter
-                        </a>
-                      ) : (
-                        <span className="text-xs text-slate-300">—</span>
-                      )}
-                    </td>
-                    <td className="px-6 py-4">
-                      <StatutBadge statut={d.statut} />
-                    </td>
-                    <td className="px-6 py-4 text-right">
-                      {(d.statut === "EN_ATTENTE_CHEF" || d.statut === "EN_ATTENTE_SANTE") && (
-                        <button
-                          type="button"
-                          onClick={() => annulerDemande(d.id)}
-                          disabled={actionEnCours === d.id}
-                          className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-bold text-rose-700 hover:bg-rose-100 disabled:opacity-50"
-                        >
-                          {actionEnCours === d.id ? "Annulation..." : "Annuler"}
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                ))
+                demandesFiltrees.map((d) => {
+                  const statut = String(d.statut || "").toUpperCase();
+                  const estRefusee = statut.startsWith("REFUSEE") || statut === "REFUSE";
+                  const peutEtreAnnulee = statut.startsWith("EN_ATTENTE");
+
+                  return (
+                    <tr
+                      key={d.id}
+                      className="transition-colors hover:bg-[#e7ffff]/40"
+                    >
+                      <td className="px-6 py-4">
+                        <p className="font-bold text-[#3c0038]">{d.type_conge_libelle || d.type_conge?.libelle || "Congé"}</p>
+                        <p className="mt-0.5 font-mono text-[10px] text-slate-400">
+                          REF #{d.id}
+                        </p>
+                        
+                        {estRefusee && d.commentaire_refus && (
+                          <p className="mt-1.5 max-w-xs text-xs font-semibold text-rose-700 bg-rose-50 border border-rose-200 rounded-md p-1.5">
+                            <span className="font-bold">Motif :</span> {d.commentaire_refus}
+                          </p>
+                        )}
+                      </td>
+                      <td className="px-6 py-4 text-xs text-slate-600">
+                        Du{" "}
+                        <span className="font-semibold text-[#3c0038]">{d.date_debut}</span>{" "}
+                        au <span className="font-semibold text-[#3c0038]">{d.date_fin}</span>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className="inline-flex items-center rounded-lg bg-[#e7ffff] px-2.5 py-1 text-xs font-bold text-[#93003f]">
+                          {d.nombre_jours} jour{d.nombre_jours > 1 ? "s" : ""}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4">
+                        {d.piece_jointe ? (
+                          <a
+                            href={d.piece_jointe}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#0097ff] hover:underline"
+                          >
+                            <Icone d={I.document} className="h-4 w-4" />
+                            Consulter
+                          </a>
+                        ) : (
+                          <span className="text-xs text-slate-300">—</span>
+                        )}
+                      </td>
+                      <td className="px-6 py-4">
+                        <StatutBadge statut={d.statut} />
+                      </td>
+                      <td className="px-6 py-4 text-right">
+                        {peutEtreAnnulee && (
+                          <button
+                            type="button"
+                            onClick={() => annulerDemande(d.id)}
+                            disabled={actionEnCours === d.id}
+                            className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-bold text-rose-700 hover:bg-rose-100 disabled:opacity-50"
+                          >
+                            {actionEnCours === d.id ? "Annulation..." : "Annuler"}
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>

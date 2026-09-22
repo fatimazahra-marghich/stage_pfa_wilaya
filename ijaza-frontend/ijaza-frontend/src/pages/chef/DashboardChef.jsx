@@ -6,38 +6,27 @@ import MainLayout from "../../components/MainLayout";
 import StatutBadge from "../../components/StatutBadge";
 import { Icone, I } from "../../components/icons";
 
-/* ------------------------------------------------------------------ */
-/* Liste complète et exhaustive de tous les motifs RH                 */
-/* ------------------------------------------------------------------ */
-const LISTE_MOTIFS_RH = [
-  { code: "ANNUEL", libelle: "Congé Annuel" },
-  { code: "MALADIE", libelle: "Congé Maladie" },
-  { code: "EXCEPTIONNELLE", libelle: "Autorisation Exceptionnelle" },
-  { code: "MATERNITE", libelle: "Congé Maternité / Paternité" },
-  { code: "PELERINAGE", libelle: "Congé Pèlerinage" },
-  { code: "SANS_SOLDE", libelle: "Congé Sans Solde" },
-  { code: "RECUPERATION", libelle: "Repos / Récupération" },
-  { code: "AUTRE", libelle: "Autre Motif" },
-];
-
 function nomComplet(d) {
-  const u = d.utilisateur_details || d;
-  if (u && (u.nom_complet || u.first_name || u.last_name)) {
-    return (
-      u.nom_complet ||
-      `${u.first_name || u.prenom || ""} ${u.last_name || u.nom || ""}`.trim()
-    );
+  if (!d) return "Inconnu";
+  const u = d.utilisateur_details || d.utilisateur || d;
+  if (typeof u === "object" && u !== null) {
+    if (u.nom_complet) return u.nom_complet;
+    if (u.first_name || u.last_name) {
+      return `${u.first_name || u.prenom || ""} ${u.last_name || u.nom || ""}`.trim();
+    }
   }
-  return d.utilisateur_nom || `Agent #${d.utilisateur || d.id}`;
+  return d.utilisateur_nom || `Agent #${d.utilisateur?.id || d.utilisateur || d.id || "?"}`;
 }
 
 export default function DashboardChefService() {
   const [demandes, setDemandes] = useState([]);
   const [agents, setAgents] = useState([]);
+  const [soldes, setSoldes] = useState([]);
   const [chargement, setChargement] = useState(true);
-  const [ongletActif, setOngletActif] = useState("demandes"); // "demandes" | "agents" | "rapports"
+  const [ongletActif, setOngletActif] = useState("demandes");
   const [recherche, setRecherche] = useState("");
   const [filtreType, setFiltreType] = useState("TOUS");
+  const [agentSelectionne, setAgentSelectionne] = useState("TOUS");
 
   // Modale de refus
   const [demandeRefus, setDemandeRefus] = useState(null);
@@ -48,30 +37,38 @@ export default function DashboardChefService() {
     setChargement(true);
     try {
       const userConnecte = JSON.parse(localStorage.getItem("user") || "{}");
-      const serviceChef =
-        userConnecte?.service?.id || userConnecte?.service || null;
+      const serviceChef = userConnecte?.service?.id || userConnecte?.service || null;
 
-      const resDemandes = await api.get("/demandes/").catch(() => ({ data: [] }));
-      const resAgents = await api.get("/users/").catch(() => ({ data: [] }));
+      const [resDemandes, resAgents, resSoldes] = await Promise.all([
+        api.get("/demandes/").catch(() => ({ data: [] })),
+        api.get("/users/").catch(() => ({ data: [] })),
+        api.get("/soldes/").catch(() => ({ data: [] })),
+      ]);
 
       let listeDemandes = resDemandes.data?.results ?? resDemandes.data ?? [];
       let listeAgents = resAgents.data?.results ?? resAgents.data ?? [];
+      let listeSoldes = resSoldes.data?.results ?? resSoldes.data ?? [];
+
+      if (!Array.isArray(listeDemandes)) listeDemandes = [];
+      if (!Array.isArray(listeAgents)) listeAgents = [];
+      if (!Array.isArray(listeSoldes)) listeSoldes = [];
 
       if (serviceChef) {
         listeAgents = listeAgents.filter((agent) => {
-          const serviceAgent = agent.service?.id || agent.service;
+          const serviceAgent = agent?.service?.id || agent?.service;
           return String(serviceAgent) === String(serviceChef);
         });
 
         listeDemandes = listeDemandes.filter((demande) => {
-          const u = demande.utilisateur_details || {};
-          const serviceDemande = u.service?.id || u.service || demande.service;
+          const u = demande?.utilisateur_details || {};
+          const serviceDemande = u.service?.id || u.service || demande?.service;
           return String(serviceDemande) === String(serviceChef);
         });
       }
 
       setDemandes(listeDemandes);
       setAgents(listeAgents);
+      setSoldes(listeSoldes);
     } catch (err) {
       console.error("Erreur de chargement du tableau de bord :", err);
     } finally {
@@ -83,18 +80,63 @@ export default function DashboardChefService() {
     chargerDonnees();
   }, []);
 
-  // Combiner les motifs par défaut et ceux qui existent dans la BDD
+  const getSoldeAgent = (agentId) => {
+    if (!agentId || !Array.isArray(soldes)) return "21j";
+    const anneeCourante = new Date().getFullYear();
+    const soldeObj =
+      soldes.find(
+        (s) =>
+          String(s?.utilisateur?.id || s?.utilisateur) === String(agentId) &&
+          Number(s?.annee) === Number(anneeCourante)
+      ) ||
+      soldes.find(
+        (s) => String(s?.utilisateur?.id || s?.utilisateur) === String(agentId)
+      );
+
+    if (!soldeObj) return "21j";
+    const soldeRestant = Math.round(soldeObj.solde_actuel ?? soldeObj.solde ?? 0);
+    return `${soldeRestant}j`;
+  };
+
+  const getDernierCongeAgent = (agentId) => {
+    if (!agentId || !Array.isArray(demandes)) return "Aucun congé";
+    const demandesAgent = demandes.filter(
+      (d) => String(d?.utilisateur?.id || d?.utilisateur) === String(agentId)
+    );
+
+    if (demandesAgent.length === 0) return "Aucun congé";
+
+    demandesAgent.sort(
+      (a, b) => new Date(b?.date_debut || b?.created_at) - new Date(a?.date_debut || a?.created_at)
+    );
+
+    const derniere = demandesAgent[0];
+    const type = derniere?.type_conge_libelle || derniere?.type_conge?.libelle || "Congé";
+
+    const dateFormatted = derniere?.date_debut
+      ? new Intl.DateTimeFormat("fr-FR", {
+          day: "2-digit",
+          month: "short",
+        }).format(new Date(derniere.date_debut))
+      : "";
+
+    return `${type} (${dateFormatted})`;
+  };
+
   const tousLesMotifsDisponibles = useMemo(() => {
     const map = new Map();
-    LISTE_MOTIFS_RH.forEach((m) => map.set(m.code, m.libelle));
+    map.set("TOUS", "Tous les motifs");
 
-    demandes.forEach((d) => {
-      const code = d.type_conge_code || d.type_conge;
-      const libelle = d.type_conge_libelle || code;
-      if (code && !map.has(code)) {
-        map.set(code, libelle);
-      }
-    });
+    if (Array.isArray(demandes)) {
+      demandes.forEach((d) => {
+        const libelle = d?.type_conge_libelle || d?.type_conge?.libelle || "";
+        const code = (d?.type_conge_code || d?.type_conge?.code || d?.type_conge || libelle || "").toString();
+
+        if (code && !map.has(code)) {
+          map.set(code, libelle || code);
+        }
+      });
+    }
 
     return Array.from(map.entries()).map(([code, libelle]) => ({
       code,
@@ -102,43 +144,68 @@ export default function DashboardChefService() {
     }));
   }, [demandes]);
 
-  // Demandes en attente
   const demandesEnAttente = useMemo(() => {
+    if (!Array.isArray(demandes)) return [];
     return demandes.filter(
       (d) =>
-        d.statut === "EN_ATTENTE_CHEF" ||
-        d.statut === "EN_ATTENTE_NIVEAU1" ||
-        d.statut === "EN_ATTENTE"
+        (d?.statut === "EN_ATTENTE_CHEF" ||
+          d?.statut === "EN_ATTENTE_NIVEAU1" ||
+          d?.statut === "EN_ATTENTE") &&
+        Number(d?.nombre_jours) > 0
     );
   }, [demandes]);
 
-  // Filtrage des demandes
   const demandesFiltrees = useMemo(() => {
     return demandesEnAttente.filter((d) => {
-      const correspondNom = nomComplet(d)
-        .toLowerCase()
-        .includes(recherche.toLowerCase());
+      const nom = nomComplet(d).toLowerCase();
+      const idUser = String(d?.utilisateur?.id || d?.utilisateur || "");
+      const correspondNom =
+        nom.includes(recherche.toLowerCase()) &&
+        (agentSelectionne === "TOUS" || idUser === String(agentSelectionne));
 
-      const codeConge = d.type_conge_code || d.type_conge;
-      const libelleConge = (d.type_conge_libelle || "").toLowerCase();
+      const codeConge = (d?.type_conge_code || d?.type_conge?.code || d?.type_conge || "").toString();
+      const libelleConge = (d?.type_conge_libelle || d?.type_conge?.libelle || "").toLowerCase();
 
       const correspondType =
         filtreType === "TOUS" ||
         codeConge === filtreType ||
-        libelleConge.includes(filtreType.toLowerCase());
+        libelleConge === filtreType.toLowerCase();
 
       return correspondNom && correspondType;
     });
-  }, [demandesEnAttente, recherche, filtreType]);
+  }, [demandesEnAttente, recherche, filtreType, agentSelectionne]);
 
-  // Calcul des statistiques réelles
+  // Extraction unique pour tous les congés maladie
+  const demandesMaladie = useMemo(() => {
+    if (!Array.isArray(demandes)) return [];
+    return demandes.filter((d) => {
+      const code = String(d?.type_conge_code || d?.type_conge || "").toUpperCase();
+      const libelle = String(d?.type_conge_libelle || "").toUpperCase();
+
+      const estMaladie =
+        code.includes("MALADIE") ||
+        libelle.includes("MALADIE") ||
+        code.includes("EXCEPTIONNELLE") ||
+        libelle.includes("EXCEPTIONNELLE");
+
+      const idUser = String(d?.utilisateur?.id || d?.utilisateur || "");
+      const matchAgent = agentSelectionne === "TOUS" || idUser === String(agentSelectionne);
+      const matchSearch = nomComplet(d).toLowerCase().includes(recherche.toLowerCase());
+
+      return estMaladie && matchAgent && matchSearch;
+    });
+  }, [demandes, agentSelectionne, recherche]);
+
   const stats = useMemo(() => {
+    const listDemandes = Array.isArray(demandes) ? demandes : [];
+    const listAgents = Array.isArray(agents) ? agents : [];
+
     const totalJoursAttente = demandesEnAttente.reduce(
-      (acc, curr) => acc + (Number(curr.nombre_jours) || 0),
+      (acc, curr) => acc + (Number(curr?.nombre_jours) || 0),
       0
     );
-    const valides = demandes.filter(
-      (d) => d.statut === "VALIDE" || d.statut === "VALIDEE"
+    const valides = listDemandes.filter(
+      (d) => d?.statut === "VALIDE" || d?.statut === "VALIDEE"
     );
 
     const now = new Date();
@@ -147,11 +214,11 @@ export default function DashboardChefService() {
     const currentYear = now.getFullYear();
 
     const absentsAujourdhui = valides.filter((d) => {
-      return d.date_debut <= todayStr && d.date_fin >= todayStr;
+      return d?.date_debut <= todayStr && d?.date_fin >= todayStr;
     }).length;
 
     const validesCeMois = valides.filter((d) => {
-      const dateRef = new Date(d.date_debut || d.created_at);
+      const dateRef = new Date(d?.date_debut || d?.created_at);
       return (
         dateRef.getMonth() === currentMonth &&
         dateRef.getFullYear() === currentYear
@@ -159,7 +226,7 @@ export default function DashboardChefService() {
     }).length;
 
     const totalAgentsCount =
-      agents.length || new Set(demandes.map((d) => d.utilisateur)).size || 1;
+      listAgents.length || new Set(listDemandes.map((d) => d?.utilisateur)).size || 1;
 
     const tauxPresence = Math.max(
       0,
@@ -173,14 +240,15 @@ export default function DashboardChefService() {
       totalAgents: totalAgentsCount,
       validesCeMois,
       tauxPresence,
+      totalMaladie: demandesMaladie.length,
     };
-  }, [demandes, demandesEnAttente, agents]);
+  }, [demandes, demandesEnAttente, agents, demandesMaladie]);
 
-  // Répartition réelle par motif
   const repartitionMotifs = useMemo(() => {
+    if (!Array.isArray(demandes)) return [];
     const comptes = {};
     demandes.forEach((d) => {
-      const motif = d.type_conge_libelle || d.type_conge_code || "Autre Motif";
+      const motif = d?.type_conge_libelle || d?.type_conge_code || "Autre Motif";
       comptes[motif] = (comptes[motif] || 0) + 1;
     });
 
@@ -192,7 +260,6 @@ export default function DashboardChefService() {
     }));
   }, [demandes]);
 
-  // Génération du PDF avec jsPDF
   const telechargerRapportPDF = () => {
     const doc = new jsPDF();
 
@@ -215,14 +282,13 @@ export default function DashboardChefService() {
     doc.setFontSize(10);
     doc.text(`• Effectif total du service : ${stats.totalAgents} agents`, 20, 53);
     doc.text(`• Taux de présence globale : ${stats.tauxPresence}%`, 20, 60);
-    doc.text(`• Agents absents aujourd'hui : ${stats.absentsAujourdhui}`, 20, 67);
-    doc.text(`• Demandes validées ce mois : ${stats.validesCeMois}`, 20, 74);
-    doc.text(`• Demandes en attente d'arbitrage : ${stats.aTraiter}`, 20, 81);
+    doc.text(`• Congés Maladie au total : ${stats.totalMaladie}`, 20, 67);
+    doc.text(`• Demandes en attente d'arbitrage : ${stats.aTraiter}`, 20, 74);
 
     doc.setFontSize(12);
-    doc.text("2. Répartition des demandes par motif", 14, 95);
+    doc.text("2. Répartition des demandes par motif", 14, 88);
 
-    let yPosition = 103;
+    let yPosition = 96;
     repartitionMotifs.forEach((item) => {
       doc.setFontSize(10);
       doc.text(
@@ -246,9 +312,7 @@ export default function DashboardChefService() {
       } else if (action === "CONTRE_VISITE") {
         endpoint = `/demandes/${id}/demander-contre-visite/`;
         payload = {
-          commentaire:
-            commentaire ||
-            "Demande de contre-visite ordonnée par le Chef de service.",
+          commentaire: commentaire || "Demande de contre-visite ordonnée par le Chef de service.",
         };
       }
 
@@ -275,8 +339,8 @@ export default function DashboardChefService() {
     <MainLayout>
       <div className="mx-auto max-w-7xl space-y-6">
         {/* Header */}
-        <header className="flex flex-col gap-4 rounded-2xl border border-[#00efff]/30 bg-white p-6 shadow-sm sm:flex-row sm:items-center sm:justify-between">
-          <div>
+        <header className="flex flex-col gap-4 rounded-2xl border border-[#00efff]/30 bg-white p-6 shadow-sm lg:flex-row lg:items-center lg:justify-between">
+          <div className="shrink-0">
             <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
               <span>Espace Chef de Service</span>
               <span>·</span>
@@ -287,10 +351,10 @@ export default function DashboardChefService() {
             </h1>
           </div>
 
-          <div className="flex rounded-xl bg-slate-100 p-1 border border-slate-200">
+          <nav className="inline-flex flex-wrap items-center gap-1 rounded-xl bg-slate-100/80 p-1.5 border border-slate-200/80">
             <button
               onClick={() => setOngletActif("demandes")}
-              className={`rounded-lg px-4 py-2 text-xs font-bold transition ${
+              className={`whitespace-nowrap rounded-lg px-3.5 py-2 text-xs font-bold transition-all ${
                 ongletActif === "demandes"
                   ? "bg-white text-[#3c0038] shadow-sm"
                   : "text-slate-500 hover:text-slate-900"
@@ -298,19 +362,32 @@ export default function DashboardChefService() {
             >
               Demandes ({stats.aTraiter})
             </button>
+
+            <button
+              onClick={() => setOngletActif("maladie")}
+              className={`whitespace-nowrap rounded-lg px-3.5 py-2 text-xs font-bold transition-all ${
+                ongletActif === "maladie"
+                  ? "bg-white text-[#93003f] shadow-sm"
+                  : "text-slate-500 hover:text-slate-900"
+              }`}
+            >
+              Congés Maladie ({stats.totalMaladie})
+            </button>
+
             <button
               onClick={() => setOngletActif("agents")}
-              className={`rounded-lg px-4 py-2 text-xs font-bold transition ${
+              className={`whitespace-nowrap rounded-lg px-3.5 py-2 text-xs font-bold transition-all ${
                 ongletActif === "agents"
                   ? "bg-white text-[#3c0038] shadow-sm"
                   : "text-slate-500 hover:text-slate-900"
               }`}
             >
-              Agents du service ({stats.totalAgents})
+              Agents ({stats.totalAgents})
             </button>
+
             <button
               onClick={() => setOngletActif("rapports")}
-              className={`rounded-lg px-4 py-2 text-xs font-bold transition ${
+              className={`whitespace-nowrap rounded-lg px-3.5 py-2 text-xs font-bold transition-all ${
                 ongletActif === "rapports"
                   ? "bg-white text-[#3c0038] shadow-sm"
                   : "text-slate-500 hover:text-slate-900"
@@ -318,15 +395,15 @@ export default function DashboardChefService() {
             >
               Statistiques & Rapports
             </button>
-          </div>
+          </nav>
         </header>
 
-        {/* KPIs */}
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {/* KPIs Cartes (3 cartes uniquement) */}
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           <div className="flex items-center justify-between rounded-2xl border border-[#00efff]/30 bg-white p-5 shadow-sm">
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-                En attente
+                En attente globale
               </p>
               <p className="mt-1 text-2xl font-extrabold text-[#3c0038]">
                 {stats.aTraiter}
@@ -340,28 +417,14 @@ export default function DashboardChefService() {
           <div className="flex items-center justify-between rounded-2xl border border-[#00efff]/30 bg-white p-5 shadow-sm">
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-                Volume sollicité
+                Congés Maladie
               </p>
               <p className="mt-1 text-2xl font-extrabold text-[#93003f]">
-                {stats.joursEnAttente} j
+                {stats.totalMaladie}
               </p>
             </div>
             <span className="grid h-11 w-11 place-items-center rounded-xl bg-[#e7ffff] text-[#93003f]">
               <Icone d={I.calendrier} className="h-5 w-5" />
-            </span>
-          </div>
-
-          <div className="flex items-center justify-between rounded-2xl border border-[#00efff]/30 bg-white p-5 shadow-sm">
-            <div>
-              <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-                Absents aujourd&apos;hui
-              </p>
-              <p className="mt-1 text-2xl font-extrabold text-amber-600">
-                {stats.absentsAujourdhui}
-              </p>
-            </div>
-            <span className="grid h-11 w-11 place-items-center rounded-xl bg-amber-50 text-amber-600 border border-amber-200">
-              <Icone d={I.utilisateurs} className="h-5 w-5" />
             </span>
           </div>
 
@@ -380,7 +443,7 @@ export default function DashboardChefService() {
           </div>
         </div>
 
-        {/* Barre de Recherche + Menu Déroulant Exhaustif */}
+        {/* Barre de Recherche */}
         <div className="flex flex-col gap-3 rounded-2xl border border-[#00efff]/30 bg-white p-4 shadow-sm sm:flex-row">
           <div className="relative flex-1">
             <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
@@ -390,24 +453,37 @@ export default function DashboardChefService() {
               type="text"
               value={recherche}
               onChange={(e) => setRecherche(e.target.value)}
-              placeholder="Rechercher un agent du service par son nom..."
+              placeholder="Rechercher par nom..."
               className="w-full rounded-xl border border-slate-200 py-2.5 pl-9 pr-4 text-sm outline-none transition focus:border-[#0097ff] focus:ring-2 focus:ring-[#00efff]/40"
             />
           </div>
 
-          {/* MENU DÉROULANT CONTENANT TOUS LES MOTIFS RH */}
           <select
-            value={filtreType}
-            onChange={(e) => setFiltreType(e.target.value)}
+            value={agentSelectionne}
+            onChange={(e) => setAgentSelectionne(e.target.value)}
             className="rounded-xl border border-slate-200 bg-[#e7ffff]/30 px-4 py-2.5 text-sm outline-none transition focus:border-[#0097ff] focus:ring-2 focus:ring-[#00efff]/40 font-medium text-slate-700"
           >
-            <option value="TOUS">Tous les motifs</option>
-            {tousLesMotifsDisponibles.map((item) => (
-              <option key={item.code} value={item.code}>
-                {item.libelle}
+            <option value="TOUS">Tous les agents</option>
+            {agents.map((agent) => (
+              <option key={agent?.id || Math.random()} value={agent?.id}>
+                {nomComplet(agent)}
               </option>
             ))}
           </select>
+
+          {ongletActif === "demandes" && (
+            <select
+              value={filtreType}
+              onChange={(e) => setFiltreType(e.target.value)}
+              className="rounded-xl border border-slate-200 bg-[#e7ffff]/30 px-4 py-2.5 text-sm outline-none transition focus:border-[#0097ff] focus:ring-2 focus:ring-[#00efff]/40 font-medium text-slate-700"
+            >
+              {tousLesMotifsDisponibles.map((item) => (
+                <option key={item.code} value={item.code}>
+                  {item.libelle}
+                </option>
+              ))}
+            </select>
+          )}
         </div>
 
         {/* CONTENUS DES ONGLETS */}
@@ -420,23 +496,24 @@ export default function DashboardChefService() {
           </div>
         ) : (
           <>
+            {/* 1. TOUTES LES DEMANDES */}
             {ongletActif === "demandes" && (
               <div className="space-y-4">
                 {demandesFiltrees.map((d) => {
                   const nom = nomComplet(d);
                   const estMaladieLongue =
-                    (d.type_conge_code === "MALADIE" ||
-                      d.type_conge_libelle?.toLowerCase().includes("maladie")) &&
-                    Number(d.nombre_jours) > 4;
+                    (d?.type_conge_code === "MALADIE" ||
+                      d?.type_conge_libelle?.toLowerCase().includes("maladie")) &&
+                    Number(d?.nombre_jours) > 4;
 
                   return (
                     <div
-                      key={d.id}
+                      key={d?.id}
                       className="flex flex-col gap-4 rounded-2xl border border-[#00efff]/30 bg-white p-5 shadow-sm transition hover:border-[#0097ff]/40 hover:shadow-md"
                     >
                       <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center">
                         <Link
-                          to={`/chef/demandes/${d.id}`}
+                          to={`/chef/demandes/${d?.id}`}
                           className="flex min-w-0 flex-1 items-center gap-4"
                         >
                           <div className="grid h-12 w-12 shrink-0 place-items-center rounded-xl bg-[#e7ffff] font-bold text-[#93003f]">
@@ -448,10 +525,10 @@ export default function DashboardChefService() {
                             </p>
                             <div className="mt-0.5 flex items-center gap-2">
                               <span className="rounded-md bg-[#e7ffff] px-2 py-0.5 text-[11px] font-semibold text-[#0097ff]">
-                                {d.type_conge_libelle || d.type_conge_code || "Congé"}
+                                {d?.type_conge_libelle || d?.type_conge_code || "Congé"}
                               </span>
                               <span className="font-mono text-[11px] text-slate-400">
-                                REF #{d.id}
+                                REF #{d?.id}
                               </span>
                             </div>
                           </div>
@@ -463,11 +540,11 @@ export default function DashboardChefService() {
                               Période
                             </p>
                             <p className="text-sm font-medium text-slate-700">
-                              {d.date_debut} <span className="text-slate-400">→</span>{" "}
-                              {d.date_fin}
+                              {d?.date_debut} <span className="text-slate-400">→</span>{" "}
+                              {d?.date_fin}
                             </p>
                             <span className="mt-0.5 inline-block rounded-md bg-[#e7ffff] px-2 py-0.5 text-[11px] font-bold text-[#93003f]">
-                              {d.nombre_jours} jour{d.nombre_jours > 1 ? "s" : ""}
+                              {d?.nombre_jours} jour{d?.nombre_jours > 1 ? "s" : ""}
                             </span>
                           </div>
 
@@ -502,7 +579,7 @@ export default function DashboardChefService() {
                             <span className="mt-0.5 text-amber-600">⚠️</span>
                             <div className="flex-1">
                               <p className="text-xs font-bold text-amber-900">
-                                Arrêt maladie supérieur à 4 jours ({d.nombre_jours} jours)
+                                Arrêt maladie supérieur à 4 jours ({d?.nombre_jours} jours)
                               </p>
                               <p className="mt-0.5 text-xs text-amber-700">
                                 Souhaitez-vous valider cet arrêt directement ou solliciter une contre-visite médicale ?
@@ -546,13 +623,92 @@ export default function DashboardChefService() {
                       <Icone d={I.valide} className="h-5 w-5" />
                     </span>
                     <p className="mt-4 text-sm text-slate-500">
-                      Aucune demande en attente correspondant à vos critères.
+                      Aucune demande correspondant à vos critères.
                     </p>
                   </div>
                 )}
               </div>
             )}
 
+            {/* 2. ONGLET MALADIE */}
+            {ongletActif === "maladie" && (
+              <div className="space-y-3">
+                {/* Note d'information explicative */}
+                <div className="flex items-start gap-2.5 rounded-2xl border border-sky-100 bg-sky-50/70 p-4 text-xs text-sky-900 shadow-sm">
+                  <span className="text-base leading-none">ℹ️</span>
+                  <div>
+                   <strong>Gestion des congés maladie :</strong> Cet espace regroupe les arrêts maladie du service. 
+                   Les arrêts <strong>ordinaires (&le; 4 jours)</strong> sont traités de manière classique, tandis que les 
+                   arrêts <strong>exceptionnels (&gt; 4 jours)</strong> nécessitent une <strong>validation médicale (RH)</strong>.
+                  </div>
+                </div>
+
+                {/* Liste des cartes d'arrêts maladie */}
+                {demandesMaladie.map((d) => {
+                  const nom = nomComplet(d);
+
+                  return (
+                    <div
+                      key={d?.id}
+                      className="flex flex-col gap-4 rounded-2xl border border-slate-100 bg-white p-4 shadow-sm transition hover:border-[#00efff]/40 sm:flex-row sm:items-center sm:justify-between"
+                    >
+                      {/* Gauche : Avatar + Nom + Badge juste "Maladie" */}
+                      <div className="flex items-center gap-4 min-w-0">
+                        <div className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-rose-100 font-bold text-[#93003f] text-base">
+                          {nom[0] ? nom[0].toUpperCase() : "A"}
+                        </div>
+
+                        <div className="min-w-0">
+                          <p className="font-bold text-[#3c0038] text-base truncate">
+                            {nom}
+                          </p>
+
+                          <div className="mt-1.5 flex items-center gap-2">
+                            {/* Badge affichant uniquement "Maladie" */}
+                            <span className="rounded-full bg-rose-100/70 px-3 py-0.5 text-xs font-semibold text-[#93003f]">
+                              Maladie
+                            </span>
+
+                            <span className="font-mono text-xs font-medium text-slate-400">
+                              #{d?.id}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Droite : Statut + Période & Durée */}
+                      <div className="flex flex-col items-start sm:items-end justify-between border-t border-slate-100 pt-3 sm:border-t-0 sm:pt-0 gap-2">
+                        <div className="pointer-events-none select-none opacity-90 scale-95 origin-right">
+                          <StatutBadge statut={d?.statut} />
+                        </div>
+
+                        <div className="text-left sm:text-right">
+                          <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                            Période & Durée
+                          </p>
+                          <p className="text-sm font-semibold text-slate-700 mt-0.5">
+                            {d?.date_debut}{" "}
+                            <span className="text-slate-400 font-normal">→</span>{" "}
+                            {d?.date_fin}
+                          </p>
+                          <p className="text-sm font-extrabold text-[#93003f] mt-0.5">
+                            {d?.nombre_jours} jour{d?.nombre_jours > 1 ? "s" : ""}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {demandesMaladie.length === 0 && (
+                  <div className="rounded-2xl border border-slate-100 bg-white p-12 text-center text-xs text-slate-400 shadow-sm">
+                    Aucun arrêt maladie enregistré pour ce service.
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* 3. AGENTS DU SERVICE */}
             {ongletActif === "agents" && (
               <div className="overflow-hidden rounded-2xl border border-[#00efff]/30 bg-white shadow-sm">
                 <table className="w-full text-left text-xs">
@@ -567,13 +723,13 @@ export default function DashboardChefService() {
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {agents
-                      .filter((a) =>
-                        nomComplet(a)
-                          .toLowerCase()
-                          .includes(recherche.toLowerCase())
-                      )
-                      .map((agent, idx) => (
-                        <tr key={idx} className="hover:bg-slate-50 transition">
+                      .filter((a) => {
+                        const matchSearch = nomComplet(a).toLowerCase().includes(recherche.toLowerCase());
+                        const matchAgentSelect = agentSelectionne === "TOUS" || String(a?.id) === String(agentSelectionne);
+                        return matchSearch && matchAgentSelect;
+                      })
+                      .map((agent) => (
+                        <tr key={agent?.id || Math.random()} className="hover:bg-slate-50 transition">
                           <td className="p-4 font-semibold text-[#3c0038] flex items-center gap-3">
                             <div className="grid h-8 w-8 place-items-center rounded-lg bg-[#e7ffff] text-[#93003f] font-bold">
                               {nomComplet(agent)[0]?.toUpperCase()}
@@ -581,20 +737,20 @@ export default function DashboardChefService() {
                             {nomComplet(agent)}
                           </td>
                           <td className="p-4 font-mono text-slate-500">
-                            #{agent.id || agent.matricule || "N/A"}
+                            #{agent?.id || agent?.matricule || "N/A"}
                           </td>
                           <td className="p-4 font-bold text-[#0097ff]">
-                            {agent.solde_conge ?? 22} jours
+                            {getSoldeAgent(agent?.id)}
                           </td>
-                          <td className="p-4 text-slate-600">
-                            {agent.dernier_conge || "Aucun récemment"}
+                          <td className="p-4 text-slate-600 font-medium">
+                            {getDernierCongeAgent(agent?.id)}
                           </td>
                           <td className="p-4 text-right">
                             <Link
-                              to={`/chef/regularisation?agent=${agent.id}`}
+                              to={`/chef/agents/${agent?.id}/historique`}
                               className="text-xs font-bold text-[#93003f] hover:underline"
                             >
-                              Demander régularisation
+                              Voir l&apos;historique
                             </Link>
                           </td>
                         </tr>
@@ -604,6 +760,7 @@ export default function DashboardChefService() {
               </div>
             )}
 
+            {/* 4. STATISTIQUES ET RAPPORTS */}
             {ongletActif === "rapports" && (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="rounded-2xl border border-[#00efff]/30 bg-white p-6 shadow-sm">

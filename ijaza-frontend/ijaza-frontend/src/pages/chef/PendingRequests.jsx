@@ -32,10 +32,11 @@ export default function PendingRequests() {
       const { data } = await api.get("/demandes/");
       const liste = data.results ?? data;
       const enAttente = liste.filter(
-        (d) =>
-          d.statut === "EN_ATTENTE_CHEF" ||
+        (d) => 
+          Number(d.nombre_jours) > 0 & 
+          (d.statut === "EN_ATTENTE_CHEF" ||
           d.statut === "EN_ATTENTE_NIVEAU1" ||
-          d.statut === "EN_ATTENTE"
+          d.statut === "EN_ATTENTE")
       );
       setDemandes(enAttente);
     } catch (err) {

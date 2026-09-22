@@ -6,12 +6,6 @@ import StatutBadge from "../../components/StatutBadge";
 import { Icone, I } from "../../components/icons";
 import { useAuth } from "../../context/AuthContext";
 
-/* ------------------------------------------------------------------ */
-/* Palette du projet                                                  */
-/*   #3c0038 prune · #93003f bordeaux · #0097ff bleu                  */
-/*   #00efff cyan  · #e7ffff cyan pâle                                */
-/* ------------------------------------------------------------------ */
-
 function salutationSelonHeure() {
   const h = new Date().getHours();
   if (h < 12) return "Bonjour";
@@ -32,13 +26,13 @@ export default function DashboardEmploye() {
       try {
         const [{ data: soldes }, { data: demandesData }] = await Promise.all([
           api.get("/soldes/"),
-          api.get("/demandes/"),
+          api.get("/demandes/mes-demandes/"),
         ]);
-        
-        const soldeExtrait = Array.isArray(soldes) ? soldes[0] : (soldes.results?.[0] ?? soldes);
+
+        const soldeExtrait = Array.isArray(soldes) ? soldes[0] : (soldes?.results?.[0] ?? soldes);
         setSolde(soldeExtrait ?? null);
-        
-        const liste = demandesData.results ?? demandesData ?? [];
+
+        const liste = demandesData?.results ?? demandesData ?? [];
         setDemandes(Array.isArray(liste) ? liste.slice(0, 5) : []);
       } catch (error) {
         console.error("Erreur de chargement du tableau de bord :", error);
@@ -52,7 +46,7 @@ export default function DashboardEmploye() {
 
   const acquisTotal = solde ? (Number(solde.droits_acquis || 0) + Number(solde.jours_reportes || 0)) : 0;
   const consommes = solde?.jours_consommes ?? 0;
-  const restant = solde ? solde.solde_actuel : 0;
+  const restant = solde?.solde_actuel ?? (acquisTotal - consommes);
   const pourcentageRestant =
     acquisTotal > 0 ? Math.max(0, Math.min(100, (restant / acquisTotal) * 100)) : 0;
   const pourcentageConsomme =
@@ -70,7 +64,7 @@ export default function DashboardEmploye() {
   function estUneMaladie(d) {
     const code = d.type_conge_code || d.type_conge?.code || "";
     const libelle = d.type_conge_libelle || d.type_conge?.libelle || "";
-    
+
     return (
       code === "MALADIE_COURTE" ||
       code === "MALADIE" ||
@@ -91,7 +85,6 @@ export default function DashboardEmploye() {
   return (
     <MainLayout>
       <div className="mx-auto max-w-7xl space-y-6">
-        {/* En-tête */}
         <header className="flex flex-col gap-4 rounded-2xl border border-[#00efff]/30 bg-white p-6 shadow-sm md:flex-row md:items-center md:justify-between">
           <div>
             <span className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-widest text-[#0097ff]">
@@ -134,9 +127,7 @@ export default function DashboardEmploye() {
           </div>
         ) : (
           <>
-            {/* Indicateurs */}
             <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
-              {/* Jauge annulaire SVG */}
               <div className={`${champCarte} flex flex-col items-center justify-center`}>
                 <div className="relative flex h-36 w-36 items-center justify-center">
                   <svg className="h-full w-full -rotate-90" viewBox="0 0 36 36">
@@ -171,7 +162,6 @@ export default function DashboardEmploye() {
                 </p>
               </div>
 
-              {/* Droits acquis */}
               <div className={`${champCarte} flex flex-col justify-between`}>
                 <span className="text-xs font-bold uppercase tracking-wider text-[#0097ff]">
                   Droits acquis
@@ -190,7 +180,6 @@ export default function DashboardEmploye() {
                 </div>
               </div>
 
-              {/* Consommés */}
               <div className={`${champCarte} flex flex-col justify-between`}>
                 <span className="text-xs font-bold uppercase tracking-wider text-[#0097ff]">
                   Jours consommés
@@ -210,7 +199,6 @@ export default function DashboardEmploye() {
               </div>
             </div>
 
-            {/* Rappel RH */}
             <div className="flex items-start gap-3 rounded-2xl border border-[#00efff]/30 bg-[#e7ffff]/40 p-4">
               <span className="mt-0.5 text-[#0097ff]">
                 <Icone d={I.info} className="h-5 w-5" />
@@ -222,7 +210,6 @@ export default function DashboardEmploye() {
               </p>
             </div>
 
-            {/* Demandes récentes */}
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-bold text-[#3c0038]">Demandes récentes</h2>
               <Link
@@ -245,31 +232,45 @@ export default function DashboardEmploye() {
                   </p>
                 </div>
               ) : (
-                demandes.map((d) => (
-                  <div
-                    key={d.id}
-                    className="flex items-center justify-between p-5 transition-colors hover:bg-[#e7ffff]/40"
-                  >
-                    <div className="space-y-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <p className="font-bold text-[#3c0038]">
-                          {d.type_conge_libelle || d.type_conge?.libelle || "Congé"}
-                        </p>
-                        {estUneMaladie(d) && d.nombre_jours > 4 && (
-                          <span className="rounded-full bg-[#93003f]/10 px-2.5 py-0.5 text-[10px] font-semibold text-[#93003f]">
-                            Contre-visite possible
-                          </span>
-                        )}
+                demandes.map((d) => {
+                  const estRefusee = String(d.statut).startsWith("REFUSEE");
+                  return (
+                    <div
+                      key={d.id}
+                      className="flex flex-col gap-2 p-5 transition-colors hover:bg-[#e7ffff]/40"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="space-y-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="font-bold text-[#3c0038]">
+                              {d.type_conge_libelle || d.type_conge?.libelle || "Congé"}
+                            </p>
+                            {estUneMaladie(d) && d.nombre_jours > 4 && (
+                              <span className="rounded-full bg-[#93003f]/10 px-2.5 py-0.5 text-[10px] font-semibold text-[#93003f]">
+                                Contre-visite possible
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-xs text-slate-500">
+                            Du <span className="font-semibold text-[#3c0038]">{d.date_debut}</span>{" "}
+                            au <span className="font-semibold text-[#3c0038]">{d.date_fin}</span> •{" "}
+                            {d.nombre_jours} jour{d.nombre_jours > 1 ? "s" : ""}
+                          </p>
+                        </div>
+                        <StatutBadge statut={d.statut} />
                       </div>
-                      <p className="text-xs text-slate-500">
-                        Du <span className="font-semibold text-[#3c0038]">{d.date_debut}</span>{" "}
-                        au <span className="font-semibold text-[#3c0038]">{d.date_fin}</span> •{" "}
-                        {d.nombre_jours} jour{d.nombre_jours > 1 ? "s" : ""}
-                      </p>
+
+                      {estRefusee && d.commentaire_refus && (
+                        <div className="mt-1 flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50/80 p-3 text-xs text-rose-800">
+                          <Icone d={I.alerte} className="mt-0.5 h-4 w-4 shrink-0 text-rose-600" />
+                          <div>
+                            <span className="font-bold">Motif du refus :</span> {d.commentaire_refus}
+                          </div>
+                        </div>
+                      )}
                     </div>
-                    <StatutBadge statut={d.statut} />
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
           </>

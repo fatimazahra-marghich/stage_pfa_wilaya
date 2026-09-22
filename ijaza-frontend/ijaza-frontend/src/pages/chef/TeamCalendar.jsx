@@ -9,19 +9,21 @@ const MOIS_FR = [
   "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre",
 ];
 
-// 🎨 Couleurs attribuées selon l'état réel de la demande
 const COULEURS_STATUT = {
-  VALIDEE: "bg-emerald-500",   // 🟢 Vert : Validé ou Maladie (Auto)
-  VALIDE: "bg-emerald-500",
-  EN_ATTENTE: "bg-amber-500",  // 🟠 Orange : En attente (> 4j / cas spécial)
-  REFUSEE: "bg-rose-500",      // 🔴 Rouge : Demande refusée
-  REFUSE: "bg-rose-500",
-  DEFAULT: "bg-[#0097ff]",     // 🔵 Bleu
+  VALIDEE: "bg-emerald-500 hover:bg-emerald-600",
+  VALIDE: "bg-emerald-500 hover:bg-emerald-600",
+  EN_ATTENTE_CHEF: "bg-amber-500 hover:bg-amber-600",
+  EN_ATTENTE_RH: "bg-indigo-500 hover:bg-indigo-600",
+  EN_ATTENTE_SANTE: "bg-purple-500 hover:bg-purple-600",
+  REFUSEE: "bg-rose-500 hover:bg-rose-600",
+  REFUSE: "bg-rose-500 hover:bg-rose-600",
+  DEFAULT: "bg-[#0097ff]",
 };
 
 export default function TeamCalendar() {
   const [demandes, setDemandes] = useState([]);
   const [typesConge, setTypesConge] = useState([]);
+  const [joursFeriesBDD, setJoursFeriesBDD] = useState([]);
   const [curseur, setCurseur] = useState(new Date());
   
   // Filtres
@@ -33,9 +35,11 @@ export default function TeamCalendar() {
     Promise.all([
       api.get("/demandes/"),
       api.get("/types-conge/").catch(() => ({ data: [] })),
-    ]).then(([{ data: dRes }, { data: tRes }]) => {
+      api.get("/jours-feries/").catch(() => ({ data: [] })),
+    ]).then(([{ data: dRes }, { data: tRes }, { data: fRes }]) => {
       setDemandes(dRes.results ?? dRes ?? []);
       setTypesConge(tRes.results ?? tRes ?? []);
+      setJoursFeriesBDD(fRes.results ?? fRes ?? []);
     });
   }, []);
 
@@ -44,51 +48,90 @@ export default function TeamCalendar() {
   const nbJours = new Date(annee, mois + 1, 0).getDate();
   const jours = Array.from({ length: nbJours }, (_, i) => i + 1);
 
-  // Fonction utilitaire pour calculer le statut réel selon les règles métier
+  // Vérifie si un jour donné est un jour férié défini par l'Admin
+  const estJourFerie = (jour) => {
+    const moisCourant = mois;
+    const dateCourante = new Date(annee, moisCourant, jour, 12, 0, 0);
+    
+    return joursFeriesBDD.some((f) => {
+      const [dYear, dMonth, dDay] = f.date_debut.split("-").map(Number);
+      const [fYear, fMonth, fDay] = f.date_fin.split("-").map(Number);
+
+      // 1. JOUR FÉRIÉ RÉCURRENT
+      if (f.est_recurrent) {
+        const fMoisDebut = dMonth - 1;
+        const fMoisFin = fMonth - 1;
+
+        if (fMoisDebut === fMoisFin) {
+          return (
+            moisCourant === fMoisDebut &&
+            jour >= dDay &&
+            jour <= fDay
+          );
+        }
+        
+        const dateCourtMoisJour = (moisCourant + 1) * 100 + jour;
+        const debutMoisJour = dMonth * 100 + dDay;
+        const finMoisJour = fMonth * 100 + fDay;
+
+        return dateCourtMoisJour >= debutMoisJour && dateCourtMoisJour <= finMoisJour;
+      }
+
+      // 2. JOUR FÉRIÉ PONCTUEL
+      const debut = new Date(dYear, dMonth - 1, dDay, 0, 0, 0);
+      const fin = new Date(fYear, fMonth - 1, fDay, 23, 59, 59);
+
+      return dateCourante >= debut && dateCourante <= fin;
+    });
+  };
+
+  // Calcule le statut réel selon la logique métier Backend Django
   const calculerStatutReel = (d) => {
     const typeCode = (d.type_conge_details?.code || d.type_conge_code || "").toUpperCase();
     const estMaladie = typeCode === "MALADIE" || d.type_conge_libelle?.toLowerCase().includes("maladie");
 
-    // Règle 1 : La maladie est automatiquement VALIDÉE
-    if (estMaladie) return "VALIDEE";
-
-    // Règle 2 : Cas spécial / exceptionnel > 4 jours non encore traité -> EN_ATTENTE
-    const debut = new Date(d.date_debut);
-    const fin = new Date(d.date_fin);
-    const dureeJours = Math.ceil((fin - debut) / (1000 * 60 * 60 * 24)) + 1;
-
-    if ((typeCode === "EXCEPTIONNEL" || typeCode === "CAS_SPECIAL") && dureeJours > 4) {
-      if (d.statut !== "VALIDEE" && d.statut !== "VALIDE" && d.statut !== "REFUSEE" && d.statut !== "REFUSE") {
-        return "EN_ATTENTE";
-      }
+    // Les congés maladie de courte durée sont validés automatiquement
+    if (estMaladie && Number(d.nombre_jours) <= 4) {
+      return "VALIDEE";
     }
 
-    return d.statut || "EN_ATTENTE";
+    return d.statut || "EN_ATTENTE_CHEF";
   };
 
-  // Regroupement par agent
   const agents = useMemo(() => {
     const parAgent = {};
 
     const demandesFiltrees = demandes.filter((d) => {
+      // 1. Exclusion des demandes de 0 jour et des demandes ANNULÉES
+      if (Number(d.nombre_jours) === 0) return false;
+      if (d.statut === "ANNULEE" || d.statut === "ANNULE") return false;
+
       const statutReel = calculerStatutReel(d);
 
-      // 1. Filtrage selon le menu déroulant Statut
+      // 2. Filtres par Statuts séparés
       if (statutFiltre === "VALIDEE") {
         if (statutReel !== "VALIDEE" && statutReel !== "VALIDE") return false;
       } 
-      else if (statutFiltre === "EN_ATTENTE") {
-        if (!statutReel?.startsWith("EN_ATTENTE")) return false;
+      else if (statutFiltre === "EN_ATTENTE_CHEF") {
+        if (statutReel !== "EN_ATTENTE_CHEF") return false;
+      }
+      else if (statutFiltre === "EN_ATTENTE_RH") {
+        if (statutReel !== "EN_ATTENTE_RH") return false;
+      }
+      else if (statutFiltre === "EN_ATTENTE_TOUT") {
+        const estEnAttente = ["EN_ATTENTE_CHEF", "EN_ATTENTE_RH", "EN_ATTENTE_SANTE", "EN_ATTENTE"].includes(statutReel);
+        if (!estEnAttente) return false;
       }
       else if (statutFiltre === "VALIDEES_ET_ATTENTE") {
-        if (statutReel === "REFUSEE" || statutReel === "REFUSE") return false;
+        const estRefusee = ["REFUSEE_CHEF", "REFUSEE_RH", "REFUSEE", "REFUSE"].includes(statutReel);
+        if (estRefusee) return false;
       }
       else if (statutFiltre === "REFUSEE") {
-        if (statutReel !== "REFUSEE" && statutReel !== "REFUSE") return false;
+        const estRefusee = ["REFUSEE_CHEF", "REFUSEE_RH", "REFUSEE", "REFUSE"].includes(statutReel);
+        if (!estRefusee) return false;
       }
-      // "TOUS" : Tout afficher
 
-      // 2. Filtre par type de congé
+      // 3. Filtre par type de congé
       if (typeFiltre !== "TOUS") {
         const typeId = d.type_conge?.id || d.type_conge;
         if (String(typeId) !== String(typeFiltre)) return false;
@@ -113,22 +156,37 @@ export default function TeamCalendar() {
       }
 
       const statutReel = calculerStatutReel(d);
-      const codeCouleur = statutReel?.startsWith("EN_ATTENTE")
-        ? "EN_ATTENTE"
-        : statutReel?.startsWith("REFUS")
-        ? "REFUSEE"
-        : "VALIDEE";
+      
+      // Affectation de la couleur selon le statut spécifique
+      let codeCouleur = "VALIDEE";
+      if (statutReel === "EN_ATTENTE_CHEF") {
+        codeCouleur = "EN_ATTENTE_CHEF";
+      } else if (statutReel === "EN_ATTENTE_RH") {
+        codeCouleur = "EN_ATTENTE_RH";
+      } else if (statutReel === "EN_ATTENTE_SANTE") {
+        codeCouleur = "EN_ATTENTE_SANTE";
+      } else if (["REFUSEE_CHEF", "REFUSEE_RH", "REFUSEE", "REFUSE"].includes(statutReel)) {
+        codeCouleur = "REFUSEE";
+      }
+
+      const [dYear, dMonth, dDay] = d.date_debut.split("-").map(Number);
+      const [fYear, fMonth, fDay] = d.date_fin.split("-").map(Number);
+
+      let libelleAffichageStatut = statutReel;
+      if (statutReel === "EN_ATTENTE_CHEF") libelleAffichageStatut = "En attente du Chef";
+      if (statutReel === "EN_ATTENTE_RH") libelleAffichageStatut = "Validé Chef - En attente RH";
+      if (statutReel === "VALIDEE") libelleAffichageStatut = "Validé définitif";
 
       parAgent[key].periodes.push({
         id: d.id,
-        debut: new Date(d.date_debut),
-        fin: new Date(d.date_fin),
+        debut: new Date(dYear, dMonth - 1, dDay, 0, 0, 0),
+        fin: new Date(fYear, fMonth - 1, fDay, 23, 59, 59),
         typeLibelle: d.type_conge_libelle || d.type_conge_details?.libelle || "Congé",
         couleur: COULEURS_STATUT[codeCouleur] || COULEURS_STATUT.DEFAULT,
         statutAffichage:
           d.type_conge_code === "MALADIE" || d.type_conge_libelle?.toLowerCase().includes("maladie")
             ? "Validé (Automatique - Maladie)"
-            : statutReel,
+            : libelleAffichageStatut,
       });
     });
 
@@ -144,12 +202,12 @@ export default function TeamCalendar() {
   );
 
   function getAbsencesJour(agent, jour) {
-    const date = new Date(annee, mois, jour);
-    return agent.periodes.filter((p) => date >= p.debut && date <= p.fin);
+    const dateCourante = new Date(annee, mois, jour, 12, 0, 0);
+    return agent.periodes.filter((p) => dateCourante >= p.debut && dateCourante <= p.fin);
   }
 
   function estWeekEnd(jour) {
-    const day = new Date(annee, mois, jour).getDay();
+    const day = new Date(annee, mois, jour, 12, 0, 0).getDay();
     return day === 0 || day === 6;
   }
 
@@ -160,7 +218,7 @@ export default function TeamCalendar() {
   return (
     <MainLayout>
       <div className="mx-auto max-w-7xl space-y-6">
-        {/* En-tête avec Navigation Mois à droite */}
+        {/* Header */}
         <header className="flex flex-col gap-4 rounded-2xl border border-[#00efff]/30 bg-white p-6 shadow-sm md:flex-row md:items-center md:justify-between">
           <div>
             <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
@@ -171,7 +229,6 @@ export default function TeamCalendar() {
             </h1>
           </div>
 
-          {/* Bloc de droite : Navigation Mois + Bouton Action */}
           <div className="flex flex-wrap items-center gap-3">
             <div className="flex items-center gap-1 rounded-xl border border-slate-200 bg-slate-50 p-1 shadow-2xs">
               <button
@@ -184,7 +241,7 @@ export default function TeamCalendar() {
 
               <button
                 onClick={() => setCurseur(new Date())}
-                title="Revenir à aujourd'hui"
+                title="Aujourd'hui"
                 className="rounded-lg px-3 py-1 text-xs font-bold text-[#3c0038] transition hover:bg-[#e7ffff] cursor-pointer"
               >
                 Aujourd&apos;hui
@@ -209,23 +266,31 @@ export default function TeamCalendar() {
           </div>
         </header>
 
-        {/* Légende complète */}
+        {/* Légende mise à jour avec distinction Chef et RH */}
         <div className="flex flex-wrap items-center gap-4 rounded-xl border border-slate-200 bg-white p-3 text-xs font-semibold shadow-xs">
           <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Légende :</span>
           <span className="inline-flex items-center gap-1.5 text-slate-700">
-            <span className="h-3 w-3 rounded bg-emerald-500" /> Validées / Auto (Maladie)
+            <span className="h-3 w-3 rounded bg-emerald-500" /> Validées / Auto
           </span>
           <span className="inline-flex items-center gap-1.5 text-slate-700">
-            <span className="h-3 w-3 rounded bg-amber-500" /> En attente (&gt; 4j / Cas spé.)
+            <span className="h-3 w-3 rounded bg-amber-500" /> En attente (Chef)
           </span>
           <span className="inline-flex items-center gap-1.5 text-slate-700">
-            <span className="h-3 w-3 rounded bg-rose-500" /> Demandes refusées
+            <span className="h-3 w-3 rounded bg-indigo-500" /> En attente (RH)
+          </span>
+          <span className="inline-flex items-center gap-1.5 text-slate-700">
+            <span className="h-3 w-3 rounded bg-rose-500" /> Refusées
+          </span>
+          <span className="inline-flex items-center gap-1.5 text-slate-700">
+            <span className="h-3 w-3 rounded bg-slate-200 border border-slate-300" /> Week-end
+          </span>
+          <span className="inline-flex items-center gap-1.5 text-slate-700">
+            <span className="h-3 w-3 rounded bg-amber-200 border border-amber-300" /> Jour Férié
           </span>
         </div>
 
         {/* Barre de Filtres */}
         <div className="grid grid-cols-1 gap-3 rounded-2xl border border-[#00efff]/30 bg-white p-4 shadow-sm sm:grid-cols-3">
-          {/* Recherche par agent */}
           <div className="relative">
             <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
               <Icone d={I.loupe} className="h-4 w-4" />
@@ -239,7 +304,6 @@ export default function TeamCalendar() {
             />
           </div>
 
-          {/* Filtre par Type de Congé */}
           <select
             value={typeFiltre}
             onChange={(e) => setTypeFiltre(e.target.value)}
@@ -253,21 +317,23 @@ export default function TeamCalendar() {
             ))}
           </select>
 
-          {/* Filtre par Statut */}
+          {/* Options de Filtre du Statut mis à jour */}
           <select
             value={statutFiltre}
             onChange={(e) => setStatutFiltre(e.target.value)}
             className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs outline-none focus:border-[#0097ff]"
           >
             <option value="VALIDEE">Absences validées uniquement</option>
-            <option value="EN_ATTENTE">Demandes en attente</option>
-            <option value="VALIDEES_ET_ATTENTE">Validées + En attente</option>
+            <option value="EN_ATTENTE_CHEF">En attente de MA validation (Chef)</option>
+            <option value="EN_ATTENTE_RH">En attente de validation RH</option>
+            <option value="EN_ATTENTE_TOUT">Toutes les demandes en attente</option>
+            <option value="VALIDEES_ET_ATTENTE">Validées + En attente (Toutes)</option>
             <option value="REFUSEE">Demandes refusées</option>
             <option value="TOUS">Toutes les demandes (Tout afficher)</option>
           </select>
         </div>
 
-        {/* Planning Matrix */}
+        {/* Grille du Planning */}
         <div className="overflow-hidden rounded-2xl border border-[#00efff]/30 bg-white shadow-sm">
           <div className="overflow-x-auto">
             <table className="w-full border-collapse text-left text-xs">
@@ -276,16 +342,24 @@ export default function TeamCalendar() {
                   <th className="sticky left-0 z-10 min-w-[180px] border-r border-[#00efff]/30 bg-[#e7ffff] px-4 py-3 font-bold text-[#3c0038]">
                     Agent ({agentsFiltres.length})
                   </th>
-                  {jours.map((j) => (
-                    <th
-                      key={j}
-                      className={`min-w-[32px] border-r border-[#00efff]/20 px-1 py-2 text-center font-medium ${
-                        estWeekEnd(j) ? "bg-slate-100 text-slate-400" : "text-slate-600"
-                      }`}
-                    >
-                      {j}
-                    </th>
-                  ))}
+                  {jours.map((j) => {
+                    const weekend = estWeekEnd(j);
+                    const ferie = estJourFerie(j);
+                    return (
+                      <th
+                        key={j}
+                        className={`min-w-[32px] border-r border-[#00efff]/20 px-1 py-2 text-center font-bold ${
+                          ferie
+                            ? "bg-amber-100 text-amber-900"
+                            : weekend
+                            ? "bg-slate-200/70 text-slate-600"
+                            : "text-slate-700"
+                        }`}
+                      >
+                        {j}
+                      </th>
+                    );
+                  })}
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#00efff]/20">
@@ -297,17 +371,22 @@ export default function TeamCalendar() {
                     {jours.map((j) => {
                       const absences = getAbsencesJour(agent, j);
                       const weekend = estWeekEnd(j);
+                      const ferie = estJourFerie(j);
                       return (
                         <td
                           key={j}
-                          className={`border-r border-[#00efff]/10 p-0.5 text-center ${
-                            weekend ? "bg-slate-50" : ""
+                          className={`border-r border-[#00efff]/10 p-0.5 text-center transition ${
+                            ferie
+                              ? "bg-amber-50/70"
+                              : weekend
+                              ? "bg-slate-100/80"
+                              : ""
                           }`}
                         >
                           {absences.map((abs, index) => (
                             <div
                               key={index}
-                              className={`h-5 w-full rounded ${abs.couleur} shadow-xs cursor-pointer`}
+                              className={`h-5 w-full rounded ${abs.couleur} shadow-xs cursor-pointer transition-transform hover:scale-105`}
                               title={`${agent.nom} - ${abs.typeLibelle} (${abs.statutAffichage})`}
                             />
                           ))}

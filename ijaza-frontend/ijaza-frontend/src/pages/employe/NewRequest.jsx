@@ -9,7 +9,7 @@ export default function NewRequest() {
   const [soldes, setSoldes] = useState(null);
   const [demandesExistantes, setDemandesExistantes] = useState([]);
   const [joursFeries, setJoursFeries] = useState([]);
-  
+
   const [form, setForm] = useState({
     type_conge: "",
     date_debut: "",
@@ -22,32 +22,34 @@ export default function NewRequest() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    // 1. Chargement prioritaire des types de congé (isolé pour éviter tout blocage)
-    api.get("/types-conge/")
+    api
+      .get("/types-conge/")
       .then((res) => {
         const rawData = res.data;
-        const listeTypes = Array.isArray(rawData) ? rawData : (rawData?.results || []);
+        const listeTypes = Array.isArray(rawData) ? rawData : rawData?.results || [];
         setTypes(listeTypes);
       })
       .catch((err) => {
         console.error("Erreur sur /types-conge/ :", err.response || err);
       });
 
-    // 2. Chargement des données secondaires (soldes, demandes, jours fériés)
-    api.get("/soldes/")
+    api
+      .get("/soldes/")
       .then((res) => {
         const raw = res.data;
-        const soldeExtrait = Array.isArray(raw) ? raw[0] : (raw?.results?.[0] ?? raw);
+        const soldeExtrait = Array.isArray(raw) ? raw[0] : raw?.results?.[0] ?? raw;
         setSoldes(soldeExtrait ?? null);
       })
       .catch((err) => console.warn("Erreur /soldes/ :", err.response?.status));
 
-    api.get("/demandes/")
-      .then((res) => setDemandesExistantes(Array.isArray(res.data) ? res.data : (res.data?.results || [])))
-      .catch((err) => console.warn("Erreur /demandes/ :", err.response?.status));
+    api
+      .get("/demandes/mes-demandes/")
+      .then((res) => setDemandesExistantes(Array.isArray(res.data) ? res.data : res.data?.results || []))
+      .catch((err) => console.warn("Erreur /demandes/mes-demandes/ :", err.response?.status));
 
-    api.get("/jours-feries/")
-      .then((res) => setJoursFeries(Array.isArray(res.data) ? res.data : (res.data?.results || [])))
+    api
+      .get("/jours-feries/")
+      .then((res) => setJoursFeries(Array.isArray(res.data) ? res.data : res.data?.results || []))
       .catch((err) => console.warn("Erreur /jours-feries/ :", err.response?.status));
   }, []);
 
@@ -61,12 +63,14 @@ export default function NewRequest() {
     selectedTypeObj?.code === "MALADIE" ||
     selectedTypeObj?.libelle?.toLowerCase().includes("maladie");
 
-  const necessitePiece = selectedTypeObj?.justificatif_requis || selectedTypeObj?.necessite_piece_jointe || estMaladie;
+  const necessitePiece =
+    Boolean(selectedTypeObj?.justificatif_requis) ||
+    Boolean(selectedTypeObj?.necessite_piece_jointe) ||
+    estMaladie;
 
-  // Calcul dynamique du nombre de jours selon la règle RH
   const calculerNombreJours = () => {
     if (!form.date_debut || !form.date_fin) return 0;
-    
+
     const [y1, m1, d1] = form.date_debut.split("-").map(Number);
     const [y2, m2, d2] = form.date_fin.split("-").map(Number);
 
@@ -88,11 +92,16 @@ export default function NewRequest() {
       const day = curDate.getDay();
       const isWeekend = day === 0 || day === 6;
 
-      const isoDate = `${curDate.getFullYear()}-${String(curDate.getMonth() + 1).padStart(2, "0")}-${String(curDate.getDate()).padStart(2, "0")}`;
+      const isoDate = `${curDate.getFullYear()}-${String(curDate.getMonth() + 1).padStart(
+        2,
+        "0"
+      )}-${String(curDate.getDate()).padStart(2, "0")}`;
 
       const isFerie = joursFeries.some((f) => {
         const dDebut = f.date_debut || f.date;
         const dFin = f.date_fin || dDebut;
+
+        if (!dDebut) return false;
 
         if (f.est_recurrent) {
           const mmdd = isoDate.slice(5);
@@ -113,22 +122,30 @@ export default function NewRequest() {
   const nbJours = calculerNombreJours();
 
   const verifierChevauchement = (debut, fin) => {
-    const dNouveauDebut = new Date(debut);
-    const dNouveauFin = new Date(fin);
+    if (!debut || !fin || !Array.isArray(demandesExistantes)) return false;
+
+    const parseDateLocal = (dateStr) => {
+      const [year, month, day] = dateStr.split("T")[0].split("-").map(Number);
+      return new Date(year, month - 1, day);
+    };
+
+    const dNouveauDebut = parseDateLocal(debut);
+    const dNouveauFin = parseDateLocal(fin);
 
     return demandesExistantes.some((d) => {
-      const statutUpper = (d.statut || "").toUpperCase();
+      const statutRaw = String(d.statut || "").toUpperCase().trim();
+      const statutClean = statutRaw.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 
-      if (
-        statutUpper.startsWith("REFUSE") || 
-        statutUpper.startsWith("ANNUL") || 
-        statutUpper === "CANCELED"
-      ) {
-        return false;
-      }
+      const estIgnore =
+        statutClean.includes("ANNUL") ||
+        statutClean.includes("REFUS") ||
+        statutClean.includes("CANCEL") ||
+        statutClean.includes("REJECT");
 
-      const dExisteDebut = new Date(d.date_debut);
-      const dExisteFin = new Date(d.date_fin);
+      if (estIgnore) return false;
+
+      const dExisteDebut = parseDateLocal(d.date_debut);
+      const dExisteFin = parseDateLocal(d.date_fin);
 
       return dNouveauDebut <= dExisteFin && dNouveauFin >= dExisteDebut;
     });
@@ -150,6 +167,13 @@ export default function NewRequest() {
       return;
     }
 
+    if (nbJours === 0) {
+      setErreur(
+        "La période sélectionnée ne contient aucun jour ouvré à décompter (week-end ou jour férié). Impossible d'envoyer la demande."
+      );
+      return;
+    }
+
     if (!estMaladie && form.date_debut < aujourdhui) {
       setErreur("Vous ne pouvez pas poser une demande de congé sur une date déjà passée.");
       return;
@@ -160,9 +184,11 @@ export default function NewRequest() {
       return;
     }
 
-    const soldeDisponible = soldes ? soldes.solde_actuel : 0;
+    const soldeDisponible = soldes ? Number(soldes.solde_actuel || 0) : 0;
     if (!estMaladie && selectedTypeObj?.décompte_solde !== false && nbJours > soldeDisponible) {
-      setErreur(`Solde insuffisant. Vous demandez ${nbJours} jour(s) alors que votre solde disponible est de ${soldeDisponible} jour(s).`);
+      setErreur(
+        `Solde insuffisant. Vous demandez ${nbJours} jour(s) alors que votre solde disponible est de ${soldeDisponible} jour(s).`
+      );
       return;
     }
 
@@ -179,13 +205,6 @@ export default function NewRequest() {
       formData.append("date_fin", form.date_fin);
       formData.append("nombre_jours", nbJours);
       formData.append("motif", form.motif);
-
-      if (estMaladie) {
-        formData.append("auto_valide", "true");
-        if (nbJours > 4) {
-          formData.append("alerte_contre_visite", "true");
-        }
-      }
 
       if (pieceJointe instanceof File) {
         formData.append("piece_jointe", pieceJointe);
@@ -233,7 +252,6 @@ export default function NewRequest() {
           onSubmit={handleSubmit}
           className="space-y-6 rounded-2xl border border-[#00efff]/30 bg-white p-6 shadow-sm sm:p-8"
         >
-          {/* 1. Type de congé */}
           <div>
             <label className={label}>1. Type de congé</label>
             <select
@@ -250,12 +268,13 @@ export default function NewRequest() {
                   </option>
                 ))
               ) : (
-                <option value="" disabled>Aucun type disponible</option>
+                <option value="" disabled>
+                  Aucun type disponible
+                </option>
               )}
             </select>
           </div>
 
-          {/* INFORMATION DYNAMIQUE DU TYPE DE CONGÉ SELECTIONNÉ */}
           {selectedTypeObj && (
             <div className="rounded-xl border border-[#00efff]/30 bg-[#e7ffff]/30 p-4 text-xs space-y-1.5">
               <p className="font-bold text-[#0097ff] flex items-center gap-1.5">
@@ -265,19 +284,21 @@ export default function NewRequest() {
               <div className="grid grid-cols-2 gap-2 text-[#3c0038] pt-1">
                 <div>
                   <span className="text-slate-400 block font-semibold">Durée maximale autorisée :</span>
-                  <span className="font-bold">{selectedTypeObj.duree_max ? `${selectedTypeObj.duree_max} jour(s)` : "Non définie"}</span>
+                  <span className="font-bold">
+                    {selectedTypeObj.duree_max ? `${selectedTypeObj.duree_max} jour(s)` : "Non définie"}
+                  </span>
                 </div>
                 <div>
                   <span className="text-slate-400 block font-semibold">Document justificatif :</span>
                   <span className="font-bold">
-                    {selectedTypeObj.type_justificatif || (necessitePiece ? "Justificatif obligatoire" : "Non requis")}
+                    {selectedTypeObj.type_justificatif ||
+                      (necessitePiece ? "Justificatif obligatoire" : "Non requis")}
                   </span>
                 </div>
               </div>
             </div>
           )}
 
-          {/* Bannière d'information maladie */}
           {estMaladie && (
             <div className="space-y-1 rounded-xl border border-[#0097ff]/30 bg-[#e7ffff]/50 p-4">
               <p className="flex items-center gap-1.5 text-xs font-bold text-[#0097ff]">
@@ -296,7 +317,6 @@ export default function NewRequest() {
             </div>
           )}
 
-          {/* 2. Dates */}
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <div>
               <label className={label}>2. Date de début</label>
@@ -320,20 +340,18 @@ export default function NewRequest() {
             </div>
           </div>
 
-          {/* Récapitulatif durée */}
           {nbJours >= 0 && form.date_debut && form.date_fin && (
             <div className="flex items-center justify-between rounded-xl border border-[#00efff]/30 bg-[#e7ffff]/40 px-4 py-3 text-xs">
               <span className="flex items-center gap-1.5 font-semibold text-slate-600">
                 <Icone d={I.horloge} className="h-4 w-4 text-[#0097ff]" />
                 Durée calculée
               </span>
-              <span className="text-sm font-bold text-[#93003f]">
+              <span className={`text-sm font-bold ${nbJours === 0 ? "text-rose-600" : "text-[#93003f]"}`}>
                 {nbJours} jour{nbJours > 1 ? "s" : ""}
               </span>
             </div>
           )}
 
-          {/* 3. Motif */}
           <div>
             <label className={label}>3. Motif</label>
             <textarea
@@ -346,7 +364,6 @@ export default function NewRequest() {
             />
           </div>
 
-          {/* 4. Pièce jointe */}
           <div>
             <label className={label}>
               4. Pièce jointe{" "}
@@ -383,7 +400,7 @@ export default function NewRequest() {
           <button
             type="submit"
             disabled={envoi}
-            className="w-full rounded-xl bg-[#93003f] py-3.5 text-sm font-bold text-white shadow-sm transition-colors hover:bg-[#3c0038] disabled:opacity-50"
+            className="w-full rounded-xl bg-[#93003f] py-3.5 text-sm font-bold text-white shadow-sm transition-colors hover:bg-[#3c0038] disabled:opacity-50 cursor-pointer"
           >
             {envoi ? "Validation et envoi..." : "Soumettre la demande"}
           </button>

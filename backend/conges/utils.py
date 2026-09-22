@@ -20,15 +20,15 @@ def calculer_jours_ouvrables(date_debut, date_fin, type_conge=None):
         return 0.0
 
     libelle = getattr(type_conge, 'libelle', '').lower().strip() if type_conge else ''
-    est_conge_annuel = (
-        'annuel' in libelle or 
-        'administratif' in libelle
-    )
+    est_conge_annuel = ('annuel' in libelle or 'administratif' in libelle)
 
+    # Si ce n'est PAS un congé annuel (ex: Maladie, Maternité, Familial, Hajj),
+    # on compte la totalité des jours calendaires consécutifs.
     if not est_conge_annuel:
         nb_jours = (date_fin - date_debut).days + 1
         return float(nb_jours)
 
+    # Pour le congé Annuel / Administratif : Exclure samedis, dimanches et jours fériés
     total_jours = 0
     date_courante = date_debut
 

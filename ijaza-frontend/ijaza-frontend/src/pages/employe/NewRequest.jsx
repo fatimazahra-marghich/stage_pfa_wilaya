@@ -58,15 +58,34 @@ export default function NewRequest() {
   }
 
   const selectedTypeObj = types.find((t) => String(t.id) === String(form.type_conge));
-  const estMaladie =
-    selectedTypeObj?.code === "MALADIE_COURTE" ||
-    selectedTypeObj?.code === "MALADIE" ||
-    selectedTypeObj?.libelle?.toLowerCase().includes("maladie");
+
+  const codeType = String(selectedTypeObj?.code || "").toUpperCase().trim();
+  const libelleTypeBrut = String(selectedTypeObj?.libelle || selectedTypeObj?.nom || "").toLowerCase();
+  const libelleType = libelleTypeBrut.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+
+  // Détections spécifiques
+  const estMaladie = (codeType.includes("MALADIE") || libelleType.includes("maladie")) && !libelleType.includes("exceptionnel");
+  const estPelerinage = codeType.includes("HAJJ") || codeType.includes("PELERINAGE") || libelleType.includes("pelerinage") || libelleType.includes("hajj");
+  const estExceptionnel = codeType.includes("EXCEPT") || libelleType.includes("exceptionnel") || libelleType.includes("familial");
+  const estPaternite = codeType.includes("PATERNITE") || libelleType.includes("paternite");
+  const estMaternite = codeType.includes("MATERNITE") || libelleType.includes("maternite");
+
+  const obtenirDureeMaxAffichage = () => {
+    if (estPelerinage) return "60 jour(s)";
+    if (estPaternite) return "15 jour(s) max (Réforme 2022)";
+    if (estMaternite) return "98 jour(s) max (14 semaines)";
+    if (estExceptionnel) return "10 jour(s) max par an";
+    if (estMaladie) return "Variable selon certificat";
+    if (selectedTypeObj?.duree_max) return `${selectedTypeObj.duree_max} jour(s)`;
+    return "Pas de limite fixe";
+  };
 
   const necessitePiece =
     Boolean(selectedTypeObj?.justificatif_requis) ||
     Boolean(selectedTypeObj?.necessite_piece_jointe) ||
-    estMaladie;
+    estMaladie ||
+    estPaternite ||
+    estMaternite;
 
   const calculerNombreJours = () => {
     if (!form.date_debut || !form.date_fin) return 0;
@@ -79,8 +98,7 @@ export default function NewRequest() {
 
     if (endDate < curDate) return 0;
 
-    const libelle = (selectedTypeObj?.libelle || selectedTypeObj?.nom || "").toLowerCase();
-    const estCongeAnnuel = libelle.includes("annuel") || libelle.includes("administratif");
+    const estCongeAnnuel = codeType.includes("ANNUEL") || codeType.includes("ADMINISTRATIF") || libelleType.includes("annuel") || libelleType.includes("administratif");
 
     if (!estCongeAnnuel) {
       const diffTime = endDate.getTime() - curDate.getTime();
@@ -92,10 +110,7 @@ export default function NewRequest() {
       const day = curDate.getDay();
       const isWeekend = day === 0 || day === 6;
 
-      const isoDate = `${curDate.getFullYear()}-${String(curDate.getMonth() + 1).padStart(
-        2,
-        "0"
-      )}-${String(curDate.getDate()).padStart(2, "0")}`;
+      const isoDate = `${curDate.getFullYear()}-${String(curDate.getMonth() + 1).padStart(2, "0")}-${String(curDate.getDate()).padStart(2, "0")}`;
 
       const isFerie = joursFeries.some((f) => {
         const dDebut = f.date_debut || f.date;
@@ -168,9 +183,22 @@ export default function NewRequest() {
     }
 
     if (nbJours === 0) {
-      setErreur(
-        "La période sélectionnée ne contient aucun jour ouvré à décompter (week-end ou jour férié). Impossible d'envoyer la demande."
-      );
+      setErreur("La période sélectionnée ne contient aucun jour. Impossible d'envoyer la demande.");
+      return;
+    }
+
+    if (estPaternite && nbJours > 15) {
+      setErreur("Le congé de paternité est limité à 15 jours consécutifs.");
+      return;
+    }
+
+    if (estMaternite && nbJours > 98) {
+      setErreur("Le congé de maternité est limité à 98 jours (14 semaines).");
+      return;
+    }
+
+    if (estPelerinage && nbJours > 60) {
+      setErreur("Le congé de pèlerinage est limité à 60 jours.");
       return;
     }
 
@@ -185,7 +213,9 @@ export default function NewRequest() {
     }
 
     const soldeDisponible = soldes ? Number(soldes.solde_actuel || 0) : 0;
-    if (!estMaladie && selectedTypeObj?.décompte_solde !== false && nbJours > soldeDisponible) {
+    const deconteDuSolde = selectedTypeObj?.decompte_solde ?? (codeType.includes("ANNUEL") || libelleType.includes("annuel"));
+
+    if (deconteDuSolde && !estMaladie && nbJours > soldeDisponible) {
       setErreur(
         `Solde insuffisant. Vous demandez ${nbJours} jour(s) alors que votre solde disponible est de ${soldeDisponible} jour(s).`
       );
@@ -193,7 +223,7 @@ export default function NewRequest() {
     }
 
     if (necessitePiece && !pieceJointe) {
-      setErreur("Un justificatif (certificat médical ou autre pièce) est obligatoire pour ce type de congé.");
+      setErreur("Un justificatif (acte de naissance, certificat médical ou autre) est obligatoire pour ce motif.");
       return;
     }
 
@@ -244,7 +274,7 @@ export default function NewRequest() {
             Nouvelle demande d'absence
           </h1>
           <p className="mt-1 text-sm text-slate-500">
-            Saisissez votre demande. Les contrôles de dates et de soldes sont effectués automatiquement.
+            Saisissez votre demande. Les contrôles de dates et de réglementations sont effectués automatiquement.
           </p>
         </header>
 
@@ -262,11 +292,19 @@ export default function NewRequest() {
             >
               <option value="">Sélectionnez un type</option>
               {types && types.length > 0 ? (
-                types.map((t) => (
-                  <option key={t.id} value={String(t.id)}>
-                    {t.libelle || t.nom || t.nom_type || t.intitule || `Type ${t.id}`}
-                  </option>
-                ))
+                types.map((t) => {
+                  let nomAffiche = t.libelle || t.nom || t.nom_type || t.intitule || `Type ${t.id}`;
+                  
+                  if (nomAffiche.toLowerCase().includes("exceptionnel") && nomAffiche.toLowerCase().includes("maladie")) {
+                    nomAffiche = "Congé Exceptionnel / Familial";
+                  }
+
+                  return (
+                    <option key={t.id} value={String(t.id)}>
+                      {nomAffiche}
+                    </option>
+                  );
+                })
               ) : (
                 <option value="" disabled>
                   Aucun type disponible
@@ -276,7 +314,7 @@ export default function NewRequest() {
           </div>
 
           {selectedTypeObj && (
-            <div className="rounded-xl border border-[#00efff]/30 bg-[#e7ffff]/30 p-4 text-xs space-y-1.5">
+            <div className="rounded-xl border border-[#00efff]/30 bg-[#e7ffff]/30 p-4 text-xs space-y-2">
               <p className="font-bold text-[#0097ff] flex items-center gap-1.5">
                 <Icone d={I.etincelle} className="h-4 w-4" />
                 Règles applicables pour ce motif :
@@ -284,36 +322,42 @@ export default function NewRequest() {
               <div className="grid grid-cols-2 gap-2 text-[#3c0038] pt-1">
                 <div>
                   <span className="text-slate-400 block font-semibold">Durée maximale autorisée :</span>
-                  <span className="font-bold">
-                    {selectedTypeObj.duree_max ? `${selectedTypeObj.duree_max} jour(s)` : "Non définie"}
-                  </span>
+                  <span className="font-bold">{obtenirDureeMaxAffichage()}</span>
                 </div>
                 <div>
                   <span className="text-slate-400 block font-semibold">Document justificatif :</span>
                   <span className="font-bold">
                     {selectedTypeObj.type_justificatif ||
-                      (necessitePiece ? "Justificatif obligatoire" : "Non requis")}
+                      (necessitePiece ? "Justificatif obligatoire" : "Aucun justificatif requis")}
                   </span>
                 </div>
               </div>
-            </div>
-          )}
 
-          {estMaladie && (
-            <div className="space-y-1 rounded-xl border border-[#0097ff]/30 bg-[#e7ffff]/50 p-4">
-              <p className="flex items-center gap-1.5 text-xs font-bold text-[#0097ff]">
-                <Icone d={I.etincelle} className="h-4 w-4" />
-                Congé maladie : Traitement automatisé
-              </p>
-              <p className="text-xs leading-relaxed text-[#3c0038]">
-                Ce congé sera automatiquement validé. Un certificat médical est obligatoire.
-                {nbJours > 4 && (
-                  <span className="mt-1 flex items-start gap-1.5 font-bold text-[#93003f]">
-                    <Icone d={I.alerte} className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                    Durée de {nbJours} jours (&gt; 4 jours) : Une alerte pour contre-visite médicale sera transmise au service RH.
-                  </span>
-                )}
-              </p>
+              {estMaladie && (
+                <p className="text-[11px] text-slate-500 border-t border-[#00efff]/20 pt-2 mt-1">
+                  💡 <b>Congé Maladie :</b> Validé automatiquement dès l'envoi du certificat médical.
+                </p>
+              )}
+              {estPaternite && (
+                <p className="text-[11px] text-slate-500 border-t border-[#00efff]/20 pt-2 mt-1">
+                  💡 <b>Congé Paternité :</b> Accordé pour chaque naissance (15 jours consécutifs rémunérés).
+                </p>
+              )}
+              {estMaternite && (
+                <p className="text-[11px] text-slate-500 border-t border-[#00efff]/20 pt-2 mt-1">
+                  💡 <b>Congé Maternité :</b> Accordé pour chaque grossesse (14 semaines / 98 jours).
+                </p>
+              )}
+              {estPelerinage && (
+                <p className="text-[11px] text-slate-500 border-t border-[#00efff]/20 pt-2 mt-1">
+                  💡 <b>Pèlerinage au Hajj :</b> Accordé une seule fois durant toute la carrière de l'agent (Plafond de 60 jours).
+                </p>
+              )}
+              {estExceptionnel && (
+                <p className="text-[11px] text-slate-500 border-t border-[#00efff]/20 pt-2 mt-1">
+                  💡 <b>Congé Exceptionnel / Familial :</b> Plafond de 10 jours par an (Mariage, Décès, etc.).
+                </p>
+              )}
             </div>
           )}
 
@@ -341,14 +385,29 @@ export default function NewRequest() {
           </div>
 
           {nbJours >= 0 && form.date_debut && form.date_fin && (
-            <div className="flex items-center justify-between rounded-xl border border-[#00efff]/30 bg-[#e7ffff]/40 px-4 py-3 text-xs">
-              <span className="flex items-center gap-1.5 font-semibold text-slate-600">
-                <Icone d={I.horloge} className="h-4 w-4 text-[#0097ff]" />
-                Durée calculée
-              </span>
-              <span className={`text-sm font-bold ${nbJours === 0 ? "text-rose-600" : "text-[#93003f]"}`}>
-                {nbJours} jour{nbJours > 1 ? "s" : ""}
-              </span>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between rounded-xl border border-[#00efff]/30 bg-[#e7ffff]/40 px-4 py-3 text-xs">
+                <span className="flex items-center gap-1.5 font-semibold text-slate-600">
+                  <Icone d={I.horloge} className="h-4 w-4 text-[#0097ff]" />
+                  Durée calculée
+                </span>
+                <span className={`text-sm font-bold ${nbJours === 0 ? "text-rose-600" : "text-[#93003f]"}`}>
+                  {nbJours} jour{nbJours > 1 ? "s" : ""}
+                </span>
+              </div>
+
+              {/* Alerte Contre-Visite Médicale pour l'utilisateur & les RH */}
+              {estMaladie && nbJours > 4 && (
+                <div className="flex items-start gap-2 rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs font-semibold text-amber-800">
+                  <Icone d={I.alerte} className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+                  <div>
+                    <p className="font-bold">Contre-visite médicale réglementaire</p>
+                    <p className="text-[11px] font-normal text-amber-700">
+                      Ce congé maladie dépasse 4 jours. Il sera validé automatiquement, mais fait l'objet d'un suivi RH avec possibilité de mandat d'un médecin conseil.
+                    </p>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

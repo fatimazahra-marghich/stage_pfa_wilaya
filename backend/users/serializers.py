@@ -8,8 +8,11 @@ from datetime import date
 class UtilisateurSerializer(serializers.ModelSerializer):
     # Détails du service rattaché (Lecture seule)
     service_details = ServiceSerializer(source='service', read_only=True)
+
+    # Champ d'écriture optionnel pour recevoir le solde de congé envoyé par React
+    solde_conge = serializers.FloatField(write_only=True, required=False, default=22.0)
     
-    # Champs calculés pour le frontend React
+    # Champs calculés pour le frontend React (Lecture)
     solde_actuel = serializers.SerializerMethodField()
     service_nom = serializers.SerializerMethodField()
     division_nom = serializers.SerializerMethodField()
@@ -20,20 +23,19 @@ class UtilisateurSerializer(serializers.ModelSerializer):
             'id', 'username', 'email', 'first_name', 'last_name', 
             'nom_complet', 'matricule', 'role', 'poste', 'password',
             'service', 'service_details', 'pelerinage_utilise',
-            'solde_actuel', 'service_nom', 'division_nom', 'is_active'
+            'solde_conge', 'solde_actuel', 'service_nom', 'division_nom', 'is_active'
         ]
         extra_kwargs = {
             'password': {'write_only': True, 'required': False},
-            'username': {'required': False},  # Généré automatiquement si absent
-            'matricule': {'required': False, 'allow_blank': True}  # ✅ Permet à l'API de créer sans matricule
+            'username': {'required': False},
+            'matricule': {'required': False, 'allow_blank': True},
+            'service': {'required': False, 'allow_null': True}
         }
 
     def get_solde_actuel(self, obj):
-        # Récupère le solde de l'année en cours
         annee_courante = date.today().year
         solde = SoldeConge.objects.filter(utilisateur=obj, annee=annee_courante).first()
         if not solde:
-            # Fallback sur le dernier solde enregistré si l'année en cours n'existe pas encore
             solde = SoldeConge.objects.filter(utilisateur=obj).last()
         return getattr(solde, 'solde_actuel', 0) if solde else 0
 
@@ -49,29 +51,46 @@ class UtilisateurSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         password = validated_data.pop('password', None)
+        solde_initial = validated_data.pop('solde_conge', 22.0)
         
-        # Si username n'est pas envoyé par React, on utilise la partie locale de l'email
         if not validated_data.get('username') and validated_data.get('email'):
             validated_data['username'] = validated_data['email'].split('@')[0]
 
         utilisateur = super().create(validated_data)
 
-        # Hachage sécurisé du mot de passe
         if password:
             utilisateur.set_password(password)
             utilisateur.save()
+
+        # Création automatique du solde pour l'année en cours
+        annee_courante = date.today().year
+        SoldeConge.objects.update_or_create(
+            utilisateur=utilisateur,
+            annee=annee_courante,
+            defaults={'droits_acquis': solde_initial, 'jours_consommes': 0.0}
+        )
 
         return utilisateur
 
     def update(self, instance, validated_data):
         password = validated_data.pop('password', None)
+        solde_saisi = validated_data.pop('solde_conge', None)
         
-        # Mise à jour des autres champs (incluant 'service')
         utilisateur = super().update(instance, validated_data)
 
-        # Si un nouveau mot de passe est fourni, on le hache
         if password:
             utilisateur.set_password(password)
             utilisateur.save()
+
+        # Mise à jour synchronisée du solde si fourni
+        if solde_saisi is not None:
+            annee_courante = date.today().year
+            solde, _ = SoldeConge.objects.get_or_create(
+                utilisateur=utilisateur,
+                annee=annee_courante,
+                defaults={'droits_acquis': solde_saisi, 'jours_consommes': 0.0}
+            )
+            solde.droits_acquis = solde_saisi
+            solde.save()
 
         return utilisateur

@@ -5,8 +5,8 @@ import MainLayout from "../../components/MainLayout";
 import { Icone, I } from "../../components/icons";
 
 function nomComplet(d) {
-  const u = d.utilisateur_details;
-  if (u) {
+  const u = d.utilisateur_details || d.utilisateur;
+  if (u && typeof u === "object") {
     return (
       u.nom_complet ||
       `${u.first_name || u.prenom || ""} ${u.last_name || u.nom || ""}`.trim()
@@ -32,11 +32,11 @@ export default function PendingRequests() {
       const { data } = await api.get("/demandes/");
       const liste = data.results ?? data;
       const enAttente = liste.filter(
-        (d) => 
-          Number(d.nombre_jours) > 0 & 
+        (d) =>
+          Number(d.nombre_jours) > 0 &&
           (d.statut === "EN_ATTENTE_CHEF" ||
-          d.statut === "EN_ATTENTE_NIVEAU1" ||
-          d.statut === "EN_ATTENTE")
+            d.statut === "EN_ATTENTE_NIVEAU1" ||
+            d.statut === "EN_ATTENTE")
       );
       setDemandes(enAttente);
     } catch (err) {
@@ -50,9 +50,22 @@ export default function PendingRequests() {
     charger();
   }, []);
 
+  // Liste propre des motifs pour le filtre
   const typesDisponibles = useMemo(() => {
-    const types = demandes.map((d) => d.type_conge_libelle).filter(Boolean);
-    return ["TOUS", ...Array.from(new Set(types))];
+    const map = new Map();
+    map.set("TOUS", "Tous les motifs");
+
+    demandes.forEach((d) => {
+      let libelle = d.type_conge_libelle || d.type_conge?.libelle || "";
+      if (libelle.includes("Exceptionnel / Maladie")) {
+        libelle = "Congé Exceptionnel";
+      }
+      if (libelle && !Array.from(map.values()).includes(libelle)) {
+        map.set(libelle, libelle);
+      }
+    });
+
+    return Array.from(map.entries()).map(([value, label]) => ({ value, label }));
   }, [demandes]);
 
   const demandesFiltrees = useMemo(
@@ -61,8 +74,13 @@ export default function PendingRequests() {
         const correspondNom = nomComplet(d)
           .toLowerCase()
           .includes(recherche.toLowerCase());
-        const correspondType =
-          filtreType === "TOUS" || d.type_conge_libelle === filtreType;
+
+        let libelle = d.type_conge_libelle || d.type_conge?.libelle || "";
+        if (libelle.includes("Exceptionnel / Maladie")) {
+          libelle = "Congé Exceptionnel";
+        }
+
+        const correspondType = filtreType === "TOUS" || libelle === filtreType;
         return correspondNom && correspondType;
       }),
     [demandes, recherche, filtreType]
@@ -73,17 +91,13 @@ export default function PendingRequests() {
       (acc, curr) => acc + (Number(curr.nombre_jours) || 0),
       0
     );
-    const agentsUniques = new Set(demandes.map((d) => d.utilisateur)).size;
-    const maladieAvis = demandes.filter(
-      (d) =>
-        (d.type_conge_code === "MALADIE" || d.type_conge_libelle?.toLowerCase().includes("maladie")) &&
-        Number(d.nombre_jours) > 4
-    ).length;
+    const agentsUniques = new Set(
+      demandes.map((d) => d.utilisateur?.id || d.utilisateur)
+    ).size;
 
-    return { total: demandes.length, totalJours, agentsUniques, maladieAvis };
+    return { total: demandes.length, totalJours, agentsUniques };
   }, [demandes]);
 
-  // Traitement : Validation simple ou Demande de Contre-Visite
   async function traiterAction(id, action, commentaire = "") {
     try {
       let endpoint = `/demandes/${id}/valider/`;
@@ -91,9 +105,6 @@ export default function PendingRequests() {
 
       if (action === "REFUSE") {
         endpoint = `/demandes/${id}/refuser/`;
-      } else if (action === "CONTRE_VISITE") {
-        endpoint = `/demandes/${id}/demander-contre-visite/`;
-        payload = { commentaire: commentaire || "Demande de contre-visite ordonnée par le Chef de service." };
       }
 
       await api.post(endpoint, payload);
@@ -115,23 +126,6 @@ export default function PendingRequests() {
     traiterAction(demandeRefus.id, "REFUSE", motifRefus);
   }
 
-  const cartesStats = [
-    { cle: "total", libelle: "À traiter", valeur: stats.total, icone: I.horloge },
-    {
-      cle: "agents",
-      libelle: "Agents concernés",
-      valeur: stats.agentsUniques,
-      icone: I.utilisateurs,
-    },
-    {
-      cle: "jours",
-      libelle: "Volume demandé",
-      valeur: `${stats.totalJours} j`,
-      icone: I.calendrier,
-      accent: true,
-    },
-  ];
-
   return (
     <MainLayout>
       <div className="mx-auto max-w-6xl space-y-6">
@@ -150,30 +144,49 @@ export default function PendingRequests() {
           </p>
         </header>
 
-        {/* Statistiques */}
+        {/* Statistiques à 3 cartes */}
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-          {cartesStats.map((c) => (
-            <div
-              key={c.cle}
-              className="flex items-center justify-between rounded-2xl border border-[#00efff]/30 bg-white p-5 shadow-sm"
-            >
-              <div>
-                <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-                  {c.libelle}
-                </p>
-                <p
-                  className={`mt-1 text-2xl font-extrabold ${
-                    c.accent ? "text-[#93003f]" : "text-[#3c0038]"
-                  }`}
-                >
-                  {c.valeur}
-                </p>
-              </div>
-              <span className="grid h-11 w-11 place-items-center rounded-xl bg-[#e7ffff] text-[#0097ff]">
-                <Icone d={c.icone} className="h-5 w-5" />
-              </span>
+          <div className="flex items-center justify-between rounded-2xl border border-[#00efff]/30 bg-white p-5 shadow-sm">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                À traiter
+              </p>
+              <p className="mt-1 text-2xl font-extrabold text-[#3c0038]">
+                {stats.total}
+              </p>
             </div>
-          ))}
+            <span className="grid h-11 w-11 place-items-center rounded-xl bg-[#e7ffff] text-[#0097ff]">
+              <Icone d={I.horloge} className="h-5 w-5" />
+            </span>
+          </div>
+
+          <div className="flex items-center justify-between rounded-2xl border border-[#00efff]/30 bg-white p-5 shadow-sm">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                Agents concernés
+              </p>
+              <p className="mt-1 text-2xl font-extrabold text-[#3c0038]">
+                {stats.agentsUniques}
+              </p>
+            </div>
+            <span className="grid h-11 w-11 place-items-center rounded-xl bg-[#e7ffff] text-[#0097ff]">
+              <Icone d={I.utilisateurs} className="h-5 w-5" />
+            </span>
+          </div>
+
+          <div className="flex items-center justify-between rounded-2xl border border-[#00efff]/30 bg-white p-5 shadow-sm">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                Volume demandé
+              </p>
+              <p className="mt-1 text-2xl font-extrabold text-[#93003f]">
+                {stats.totalJours} j
+              </p>
+            </div>
+            <span className="grid h-11 w-11 place-items-center rounded-xl bg-[#e7ffff] text-[#0097ff]">
+              <Icone d={I.calendrier} className="h-5 w-5" />
+            </span>
+          </div>
         </div>
 
         {/* Recherche & Filtres */}
@@ -193,11 +206,11 @@ export default function PendingRequests() {
           <select
             value={filtreType}
             onChange={(e) => setFiltreType(e.target.value)}
-            className="rounded-xl border border-slate-200 bg-[#e7ffff]/40 px-4 py-2.5 text-sm outline-none transition focus:border-[#0097ff] focus:ring-2 focus:ring-[#00efff]/40"
+            className="rounded-xl border border-slate-200 bg-[#e7ffff]/40 px-4 py-2.5 text-sm outline-none font-medium text-slate-700 transition focus:border-[#0097ff] focus:ring-2 focus:ring-[#00efff]/40"
           >
             {typesDisponibles.map((t) => (
-              <option key={t} value={t}>
-                {t === "TOUS" ? "Tous les motifs" : t}
+              <option key={t.value} value={t.value}>
+                {t.label}
               </option>
             ))}
           </select>
@@ -216,10 +229,12 @@ export default function PendingRequests() {
             {demandesFiltrees.map((d) => {
               const nom = nomComplet(d);
               const idUtilisateur = d.utilisateur?.id || d.utilisateur;
-              const estMaladieLongue =
-                (d.type_conge_code === "MALADIE" ||
-                  d.type_conge_libelle?.toLowerCase().includes("maladie")) &&
-                Number(d.nombre_jours) > 4;
+
+              let typeAffiche =
+                d.type_conge_libelle || d.type_conge?.libelle || "Congé";
+              if (typeAffiche.includes("Exceptionnel / Maladie")) {
+                typeAffiche = "Congé Exceptionnel";
+              }
 
               return (
                 <div
@@ -227,20 +242,21 @@ export default function PendingRequests() {
                   className="flex flex-col gap-4 rounded-2xl border border-[#00efff]/30 bg-white p-5 shadow-sm transition hover:border-[#0097ff]/40 hover:shadow-md"
                 >
                   <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center">
+                    {/* Lien cliquable ouvrant RequestDetail */}
                     <Link
                       to={`/chef/demandes/${d.id}`}
-                      className="flex min-w-0 flex-1 items-center gap-4"
+                      className="flex min-w-0 flex-1 items-center gap-4 group"
                     >
-                      <div className="grid h-12 w-12 shrink-0 place-items-center rounded-xl bg-[#e7ffff] font-bold text-[#93003f]">
+                      <div className="grid h-12 w-12 shrink-0 place-items-center rounded-xl bg-[#e7ffff] font-bold text-[#93003f] transition group-hover:bg-[#0097ff] group-hover:text-white">
                         {nom[0] ? nom[0].toUpperCase() : "A"}
                       </div>
                       <div className="truncate">
-                        <p className="truncate font-semibold text-[#3c0038] transition hover:text-[#93003f]">
+                        <p className="truncate font-semibold text-[#3c0038] transition group-hover:text-[#0097ff]">
                           {nom}
                         </p>
                         <div className="mt-0.5 flex flex-wrap items-center gap-2">
                           <span className="rounded-md bg-[#e7ffff] px-2 py-0.5 text-[11px] font-semibold text-[#0097ff]">
-                            {d.type_conge_libelle || "Congé"}
+                            {typeAffiche}
                           </span>
                           <span className="font-mono text-[11px] text-slate-400">
                             REF #{d.id}
@@ -255,98 +271,55 @@ export default function PendingRequests() {
                           Période
                         </p>
                         <p className="text-sm font-medium text-slate-700">
-                          {d.date_debut} <span className="text-slate-400">→</span> {d.date_fin}
+                          {d.date_debut} <span className="text-slate-400">→</span>{" "}
+                          {d.date_fin}
                         </p>
                         <span className="mt-0.5 inline-block rounded-md bg-[#e7ffff] px-2 py-0.5 text-[11px] font-bold text-[#93003f]">
                           {d.nombre_jours} jour{d.nombre_jours > 1 ? "s" : ""}
                         </span>
                       </div>
 
-                      {/* Boutons d'action pour congés standards */}
-                      {!estMaladieLongue && (
-                        <div className="flex items-center gap-2">
-                          <Link
-                            to={`/chef/agents/${idUtilisateur}/historique`}
-                            title="Historique de l'agent"
-                            className="inline-flex items-center justify-center rounded-xl border border-[#00efff]/40 bg-[#e7ffff] p-2.5 text-[#0097ff] transition hover:bg-[#0097ff] hover:text-white"
+                      <div className="flex items-center gap-2">
+                        <Link
+                          to={`/chef/agents/${idUtilisateur}/historique`}
+                          title="Historique de l'agent"
+                          className="inline-flex items-center justify-center rounded-xl border border-[#00efff]/40 bg-[#e7ffff] p-2.5 text-[#0097ff] transition hover:bg-[#0097ff] hover:text-white"
+                        >
+                          <svg
+                            className="h-4 w-4"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            viewBox="0 0 24 24"
                           >
-                            <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                            </svg>
-                          </Link>
-                          <button
-                            onClick={() => {
-                              setDemandeRefus(d);
-                              setMotifRefus("");
-                              setErreurRefus("");
-                            }}
-                            className="inline-flex items-center gap-1.5 rounded-xl border border-slate-300 px-4 py-2 text-xs font-bold text-slate-700 transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-700"
-                          >
-                            <Icone d={I.refuser} className="h-4 w-4" />
-                            Refuser
-                          </button>
-                          <button
-                            onClick={() => traiterAction(d.id, "VALIDE")}
-                            className="inline-flex items-center gap-1.5 rounded-xl bg-[#93003f] px-4 py-2 text-xs font-bold text-white shadow-sm transition hover:bg-[#3c0038]"
-                          >
-                            <Icone d={I.valide} className="h-4 w-4" />
-                            Valider 
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Bloc spécifique : Congé maladie > 4 jours */}
-                  {estMaladieLongue && (
-                    <div className="mt-2 rounded-xl border border-amber-200 bg-amber-50/70 p-4">
-                      <div className="flex items-start gap-3">
-                        <span className="mt-0.5 text-amber-600">⚠️</span>
-                        <div className="flex-1">
-                          <p className="text-xs font-bold text-amber-900">
-                            Arrêt maladie supérieur à 4 jours ({d.nombre_jours} jours)
-                          </p>
-                          <p className="mt-0.5 text-xs text-amber-700">
-                            En tant que Chef de service, vous pouvez valider la demande directement ou solliciter une contre-visite médicale auprès des RH.
-                          </p>
-
-                          <div className="mt-3 flex flex-wrap gap-2">
-                            <Link
-                              to={`/chef/agents/${idUtilisateur}/historique`}
-                              className="inline-flex items-center gap-1.5 rounded-lg border border-[#0097ff]/30 bg-white px-3 py-1.5 text-xs font-bold text-[#0097ff] hover:bg-[#0097ff] hover:text-white"
-                            >
-                              <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                              </svg>
-                              Historique de l'agent
-                            </Link>
-                            <button
-                              onClick={() => traiterAction(d.id, "VALIDE")}
-                              className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white shadow-sm hover:bg-emerald-700"
-                            >
-                              Valider sans contre-visite
-                            </button>
-                            <button
-                              onClick={() => traiterAction(d.id, "CONTRE_VISITE")}
-                              className="rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-bold text-white shadow-sm hover:bg-amber-700"
-                            >
-                              Demander une contre-visite (RH)
-                            </button>
-                            <button
-                              onClick={() => {
-                                setDemandeRefus(d);
-                                setMotifRefus("");
-                                setErreurRefus("");
-                              }}
-                              className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-50"
-                            >
-                              Refuser
-                            </button>
-                          </div>
-                        </div>
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+                            />
+                          </svg>
+                        </Link>
+                        <button
+                          onClick={() => {
+                            setDemandeRefus(d);
+                            setMotifRefus("");
+                            setErreurRefus("");
+                          }}
+                          className="inline-flex items-center gap-1.5 rounded-xl border border-slate-300 px-4 py-2 text-xs font-bold text-slate-700 transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-700"
+                        >
+                          <Icone d={I.refuser} className="h-4 w-4" />
+                          Refuser
+                        </button>
+                        <button
+                          onClick={() => traiterAction(d.id, "VALIDE")}
+                          className="inline-flex items-center gap-1.5 rounded-xl bg-[#93003f] px-4 py-2 text-xs font-bold text-white shadow-sm transition hover:bg-[#3c0038]"
+                        >
+                          <Icone d={I.valide} className="h-4 w-4" />
+                          Valider
+                        </button>
                       </div>
                     </div>
-                  )}
+                  </div>
                 </div>
               );
             })}
@@ -366,7 +339,7 @@ export default function PendingRequests() {
           </div>
         )}
 
-        {/* Modale de Saisie du Motif de Refus */}
+        {/* Modale de Refus */}
         {demandeRefus && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-sm">
             <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
@@ -386,7 +359,7 @@ export default function PendingRequests() {
                 value={motifRefus}
                 onChange={(e) => setMotifRefus(e.target.value)}
                 placeholder="Saisissez le motif de refus obligatoire..."
-                className="mt-4 w-full rounded-xl border border-slate-200 p-3 text-sm outline-none focus:border-[#0097ff] focus:ring-2 focus:ring-[#00efff]/40"
+                className="mt-4 w-full rounded-xl border border-slate-200 p-3 text-sm outline-none transition focus:border-[#0097ff] focus:ring-2 focus:ring-[#00efff]/40"
               />
 
               {erreurRefus && (

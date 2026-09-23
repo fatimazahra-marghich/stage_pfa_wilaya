@@ -111,7 +111,11 @@ export default function DashboardChefService() {
     );
 
     const derniere = demandesAgent[0];
-    const type = derniere?.type_conge_libelle || derniere?.type_conge?.libelle || "Congé";
+    let type = derniere?.type_conge_libelle || derniere?.type_conge?.libelle || "Congé";
+
+    if (type.includes("Exceptionnel / Maladie")) {
+      type = "Congé Exceptionnel";
+    }
 
     const dateFormatted = derniere?.date_debut
       ? new Intl.DateTimeFormat("fr-FR", {
@@ -129,8 +133,12 @@ export default function DashboardChefService() {
 
     if (Array.isArray(demandes)) {
       demandes.forEach((d) => {
-        const libelle = d?.type_conge_libelle || d?.type_conge?.libelle || "";
-        const code = (d?.type_conge_code || d?.type_conge?.code || d?.type_conge || libelle || "").toString();
+        let libelle = d?.type_conge_libelle || d?.type_conge?.libelle || "";
+        let code = (d?.type_conge_code || d?.type_conge?.code || d?.type_conge || libelle || "").toString();
+
+        if (libelle.includes("Exceptionnel / Maladie")) {
+          libelle = "Congé Exceptionnel";
+        }
 
         if (code && !map.has(code)) {
           map.set(code, libelle || code);
@@ -175,18 +183,20 @@ export default function DashboardChefService() {
     });
   }, [demandesEnAttente, recherche, filtreType, agentSelectionne]);
 
-  // Extraction unique pour tous les congés maladie
+  // Extraction stricte des congés maladie (exclusion des demandes annulées)
   const demandesMaladie = useMemo(() => {
     if (!Array.isArray(demandes)) return [];
     return demandes.filter((d) => {
-      const code = String(d?.type_conge_code || d?.type_conge || "").toUpperCase();
-      const libelle = String(d?.type_conge_libelle || "").toUpperCase();
+      // Exclure les demandes annulées
+      if (d?.statut === "ANNULEE") return false;
 
-      const estMaladie =
-        code.includes("MALADIE") ||
-        libelle.includes("MALADIE") ||
-        code.includes("EXCEPTIONNELLE") ||
-        libelle.includes("EXCEPTIONNELLE");
+      const code = String(d?.type_conge_code || d?.type_conge?.code || d?.type_conge || "").toUpperCase();
+      const libelle = String(d?.type_conge_libelle || d?.type_conge?.libelle || "").toUpperCase();
+
+      const estMaladiePure = code.includes("MALADIE") || libelle.includes("MALADIE");
+      const estExceptionnel = code.includes("EXCEPTIONNEL") || libelle.includes("EXCEPTIONNEL") || libelle.includes("FAMILIAL");
+
+      const estMaladie = estMaladiePure && !estExceptionnel;
 
       const idUser = String(d?.utilisateur?.id || d?.utilisateur || "");
       const matchAgent = agentSelectionne === "TOUS" || idUser === String(agentSelectionne);
@@ -248,7 +258,10 @@ export default function DashboardChefService() {
     if (!Array.isArray(demandes)) return [];
     const comptes = {};
     demandes.forEach((d) => {
-      const motif = d?.type_conge_libelle || d?.type_conge_code || "Autre Motif";
+      let motif = d?.type_conge_libelle || d?.type_conge_code || "Autre Motif";
+      if (motif.includes("Exceptionnel / Maladie")) {
+        motif = "Congé Exceptionnel";
+      }
       comptes[motif] = (comptes[motif] || 0) + 1;
     });
 
@@ -398,7 +411,7 @@ export default function DashboardChefService() {
           </nav>
         </header>
 
-        {/* KPIs Cartes (3 cartes uniquement) */}
+        {/* KPIs */}
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           <div className="flex items-center justify-between rounded-2xl border border-[#00efff]/30 bg-white p-5 shadow-sm">
             <div>
@@ -496,7 +509,7 @@ export default function DashboardChefService() {
           </div>
         ) : (
           <>
-            {/* 1. TOUTES LES DEMANDES */}
+            {/* 1. DEMANDES EN ATTENTE */}
             {ongletActif === "demandes" && (
               <div className="space-y-4">
                 {demandesFiltrees.map((d) => {
@@ -525,7 +538,9 @@ export default function DashboardChefService() {
                             </p>
                             <div className="mt-0.5 flex items-center gap-2">
                               <span className="rounded-md bg-[#e7ffff] px-2 py-0.5 text-[11px] font-semibold text-[#0097ff]">
-                                {d?.type_conge_libelle || d?.type_conge_code || "Congé"}
+                                {d?.type_conge_libelle?.includes("Exceptionnel / Maladie") 
+                                  ? "Congé Exceptionnel" 
+                                  : (d?.type_conge_libelle || d?.type_conge_code || "Congé")}
                               </span>
                               <span className="font-mono text-[11px] text-slate-400">
                                 REF #{d?.id}
@@ -630,29 +645,25 @@ export default function DashboardChefService() {
               </div>
             )}
 
-            {/* 2. ONGLET MALADIE */}
+            {/* 2. ONGLET MALADIE AVEC ÉTIQUETTE SI > 4 JOURS */}
             {ongletActif === "maladie" && (
               <div className="space-y-3">
-                {/* Note d'information explicative */}
                 <div className="flex items-start gap-2.5 rounded-2xl border border-sky-100 bg-sky-50/70 p-4 text-xs text-sky-900 shadow-sm">
                   <span className="text-base leading-none">ℹ️</span>
                   <div>
-                   <strong>Gestion des congés maladie :</strong> Cet espace regroupe les arrêts maladie du service. 
-                   Les arrêts <strong>ordinaires (&le; 4 jours)</strong> sont traités de manière classique, tandis que les 
-                   arrêts <strong>exceptionnels (&gt; 4 jours)</strong> nécessitent une <strong>validation médicale (RH)</strong>.
+                    <strong>Gestion des congés maladie :</strong> Cet espace regroupe les arrêts maladie du service. Les arrêts ordinaires (&le; 4 jours) sont traités de manière classique, tandis que les arrêts de plus de 4 jours déclenchent automatiquement une alerte de contre-visite médicale RH.
                   </div>
                 </div>
 
-                {/* Liste des cartes d'arrêts maladie */}
                 {demandesMaladie.map((d) => {
                   const nom = nomComplet(d);
+                  const estMaladieLongue = Number(d?.nombre_jours) > 4;
 
                   return (
                     <div
                       key={d?.id}
                       className="flex flex-col gap-4 rounded-2xl border border-slate-100 bg-white p-4 shadow-sm transition hover:border-[#00efff]/40 sm:flex-row sm:items-center sm:justify-between"
                     >
-                      {/* Gauche : Avatar + Nom + Badge juste "Maladie" */}
                       <div className="flex items-center gap-4 min-w-0">
                         <div className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-rose-100 font-bold text-[#93003f] text-base">
                           {nom[0] ? nom[0].toUpperCase() : "A"}
@@ -663,8 +674,7 @@ export default function DashboardChefService() {
                             {nom}
                           </p>
 
-                          <div className="mt-1.5 flex items-center gap-2">
-                            {/* Badge affichant uniquement "Maladie" */}
+                          <div className="mt-1.5 flex flex-wrap items-center gap-2">
                             <span className="rounded-full bg-rose-100/70 px-3 py-0.5 text-xs font-semibold text-[#93003f]">
                               Maladie
                             </span>
@@ -676,10 +686,19 @@ export default function DashboardChefService() {
                         </div>
                       </div>
 
-                      {/* Droite : Statut + Période & Durée */}
                       <div className="flex flex-col items-start sm:items-end justify-between border-t border-slate-100 pt-3 sm:border-t-0 sm:pt-0 gap-2">
-                        <div className="pointer-events-none select-none opacity-90 scale-95 origin-right">
-                          <StatutBadge statut={d?.statut} />
+                        {/* Zone des Badges de Statut */}
+                        <div className="flex items-center gap-2 flex-wrap justify-end">
+                          <div className="pointer-events-none select-none opacity-90 scale-95 origin-right">
+                            <StatutBadge statut={d?.statut} />
+                          </div>
+
+                          {/* Petit badge explicatif si > 4 jours */}
+                          {estMaladieLongue && (
+                            <span className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-50 px-2.5 py-0.5 text-[11px] font-bold text-amber-800 shadow-xs">
+                              <span>⚠️</span> Contre-visite déclenchée
+                            </span>
+                          )}
                         </div>
 
                         <div className="text-left sm:text-right">
@@ -691,9 +710,17 @@ export default function DashboardChefService() {
                             <span className="text-slate-400 font-normal">→</span>{" "}
                             {d?.date_fin}
                           </p>
+                          
                           <p className="text-sm font-extrabold text-[#93003f] mt-0.5">
                             {d?.nombre_jours} jour{d?.nombre_jours > 1 ? "s" : ""}
                           </p>
+
+                          {/* Petit texte d'information discret si > 4 jours */}
+                          {estMaladieLongue && (
+                            <p className="text-[10px] font-medium text-amber-700 mt-0.5">
+                              (&gt; 4 jours : nécessite un contrôle médical RH)
+                            </p>
+                          )}
                         </div>
                       </div>
                     </div>

@@ -1,9 +1,10 @@
+import traceback
+from datetime import datetime, date
 from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from datetime import datetime, date
-import traceback
 from rest_framework_simplejwt.authentication import JWTAuthentication
+from django.db import models
 
 from .permissions import IsAdminUserRole, IsRHUserRole, IsAdminOrReadOnly
 from .models import TypeConge, SoldeConge, JourFerie, DemandeConge, EtapeValidation, CorrectionSolde
@@ -22,7 +23,7 @@ class TypeCongeViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated, IsAdminOrReadOnly]
 
 
-# 🏢 RESERVÉ AU RH, ADMIN & CHEFS DE SERVICE
+# 🏢 RESERVÉ AU RH GENERAL, ADMIN & CHEFS DE SERVICE
 class SoldeCongeViewSet(viewsets.ModelViewSet):
     serializer_class = SoldeCongeSerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -30,18 +31,25 @@ class SoldeCongeViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         user = self.request.user
         role = str(getattr(user, 'role', '')).upper().strip()
+        service_user = getattr(user, 'service', None)
+        code_service = str(getattr(service_user, 'code', '') or '').upper().strip()
 
-        # 1. Rôles globaux RH / Admin
-        if role in ['RH', 'ADMIN_RH', 'DIRECTEUR', 'ADMIN', 'SUPERADMIN'] or user.is_superuser:
+        # Seul le Chef RH / Admin a la vue sur tous les soldes
+        est_chef_rh = (
+            getattr(user, 'est_rh_general', False)
+            or user.is_superuser
+            or role in ['ADMIN', 'SUPERADMIN']
+            or (role in ['CHEF_SERVICE', 'CHEF'] and 'RH' in code_service)
+        )
+
+        if est_chef_rh:
             return SoldeConge.objects.all()
 
-        # 2. Chefs de service
         if role in ['CHEF_SERVICE', 'CHEF']:
-            if hasattr(user, 'service') and user.service:
-                return SoldeConge.objects.filter(utilisateur__service=user.service)
+            if service_user:
+                return SoldeConge.objects.filter(utilisateur__service=service_user)
             return SoldeConge.objects.filter(utilisateur=user)
 
-        # 3. Agent simple
         return SoldeConge.objects.filter(utilisateur=user)
 
 
@@ -52,7 +60,7 @@ class JourFerieViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated, IsAdminOrReadOnly]
 
 
-# 🏢 GESTION DES DEMANDES
+# 🏢 GESTION DES DEMANDES DE CONGÉ
 class DemandeCongeViewSet(viewsets.ModelViewSet):
     serializer_class = DemandeCongeSerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -61,16 +69,35 @@ class DemandeCongeViewSet(viewsets.ModelViewSet):
         user = self.request.user
         role = str(getattr(user, 'role', '')).upper().strip()
 
-        if role in ['RH', 'ADMIN_RH', 'DIRECTEUR', 'ADMIN', 'SUPERADMIN'] or user.is_superuser:
+        if not user.is_authenticated:
+            return DemandeConge.objects.none()
+
+        service_user = getattr(user, 'service', None)
+        code_service = str(getattr(service_user, 'code', '') or '').upper().strip()
+
+        # Vérification si l'utilisateur est le CHEF RH GÉNÉRAL / ADMIN
+        # Un agent simple du service RH (role == 'EMPLOYE') N'EST PAS Chef RH Général
+        est_chef_rh = (
+            getattr(user, 'est_rh_general', False)
+            or user.is_superuser
+            or role in ['ADMIN', 'SUPERADMIN']
+            or (role in ['CHEF_SERVICE', 'CHEF'] and 'RH' in code_service)
+            or (hasattr(user, 'service_dirige') and user.service_dirige and 'RH' in code_service)
+        )
+
+        # 1. Chef RH Général & Administrateurs : Visibilité GLOBALE sur toutes les divisions/services
+        if est_chef_rh:
             return DemandeConge.objects.all().order_by('-created_at')
 
+        # 2. Chefs de Service Non-RH : Voient les demandes de leur service + les leurs
         if role in ['CHEF_SERVICE', 'CHEF']:
-            if hasattr(user, 'service') and user.service:
+            if service_user:
                 return DemandeConge.objects.filter(
-                    utilisateur__service=user.service
+                    models.Q(utilisateur__service=service_user) | models.Q(utilisateur=user)
                 ).order_by('-created_at')
             return DemandeConge.objects.filter(utilisateur=user).order_by('-created_at')
 
+        # 3. Agent Standard & Agent RH Simple : ne voient QUE leurs propres demandes
         return DemandeConge.objects.filter(utilisateur=user).order_by('-created_at')
 
     @action(detail=False, methods=['get'], url_path='mes-demandes')
@@ -87,81 +114,137 @@ class DemandeCongeViewSet(viewsets.ModelViewSet):
         type_conge = serializer.validated_data.get('type_conge')
         date_debut = serializer.validated_data.get('date_debut')
         date_fin = serializer.validated_data.get('date_fin')
-        libelle_type = getattr(type_conge, 'libelle', '').lower() if type_conge else ''
+        motif_saisi = serializer.validated_data.get('motif', '') or ''
+        
+        code_type = str(getattr(type_conge, 'code', '') or '').upper().strip()
+        libelle_type = str(getattr(type_conge, 'libelle', '') or '').lower().strip()
 
-        # 1. Calcul automatique du nombre de jours
+        # 1. Calcul automatique du nombre de jours réels
         nb_jours_reels = calculer_jours_ouvrables(date_debut, date_fin, type_conge=type_conge)
         
-        # 2. Circuit de validation initial
-        if 'maladie' in libelle_type and ('courte' in libelle_type or nb_jours_reels <= 4):
+        # 2. Règle spéciale Congé Maladie & Contre-visite
+        est_maladie = 'MALADIE' in code_type or ('maladie' in libelle_type and 'exceptionnel' not in libelle_type)
+
+        code_service = str(getattr(getattr(user, 'service', None), 'code', '') or '').upper()
+        est_du_service_rh = ('RH' in code_service or 'RESSOURCES' in code_service)
+
+        est_chef_rh = (
+            getattr(user, 'est_rh_general', False)
+            or user.is_superuser
+            or role in ['ADMIN', 'SUPERADMIN']
+            or (role in ['CHEF_SERVICE', 'CHEF'] and est_du_service_rh)
+        )
+
+        if est_maladie:
             statut_depart = 'VALIDEE'
-        elif 'moyenne' in libelle_type or 'longue' in libelle_type or ('maladie' in libelle_type and nb_jours_reels > 4):
-            statut_depart = 'EN_ATTENTE_SANTE'
-        elif role in ['CHEF_SERVICE', 'CHEF', 'RH', 'ADMIN_RH']:
+            if nb_jours_reels > 4:
+                tag_contre_visite = "[CONTRE-VISITE MÉDICALE REQUISE]"
+                if tag_contre_visite not in motif_saisi:
+                    motif_saisi = f"{motif_saisi} {tag_contre_visite}".strip()
+
+        # 3. ROUTAGE DE VALIDATION LOGIQUE MÉTIER
+        # A. Chef RH Général : Validée automatiquement d'emblée
+        elif est_chef_rh:
+            statut_depart = 'VALIDEE'
+
+        # B. Chef de Service Non-RH : Saute la N1 (validé auto) et passe en EN_ATTENTE_RH
+        elif role in ['CHEF_SERVICE', 'CHEF']:
             statut_depart = 'EN_ATTENTE_RH'
+
+        # C. Agent du Service RH Simple : Son chef direct est le RH Général -> Directement EN_ATTENTE_RH
+        elif est_du_service_rh:
+            statut_depart = 'EN_ATTENTE_RH'
+
+        # D. Agent Standard : Passe en EN_ATTENTE_CHEF
         else:
             statut_depart = 'EN_ATTENTE_CHEF'
 
-        # 3. Enregistrement de la demande
+        # 4. Enregistrement de la demande
         demande = serializer.save(
             utilisateur=user,
             nombre_jours=nb_jours_reels,
-            statut=statut_depart
+            statut=statut_depart,
+            motif=motif_saisi
         )
 
-        # 4. Déduction automatique si le congé est immédiatement validé (ex: Maladie courte)
-        if statut_depart == 'VALIDEE' and ('annuel' in libelle_type or 'administratif' in libelle_type):
+        # 5. Déduction du solde uniquement pour les demandes validées d'office
+        est_annuel = 'ANNUEL' in code_type or 'ADMINISTRATIF' in code_type or 'annuel' in libelle_type or 'administratif' in libelle_type
+        if statut_depart == 'VALIDEE' and est_annuel:
             annee_actuelle = date_debut.year
             solde, _ = SoldeConge.objects.get_or_create(
                 utilisateur=user,
                 annee=annee_actuelle,
                 defaults={'droits_acquis': 22.0, 'jours_reportes': 0.0, 'jours_consommes': 0.0}
             )
-            solde.jours_consommes += nb_jours_reels
+            solde.jours_consommes = float(solde.jours_consommes) + float(nb_jours_reels)
             solde.save()
 
     @action(detail=True, methods=['post', 'patch', 'put'])
     def valider(self, request, pk=None):
         try:
             demande = self.get_object()
+            user = request.user
             commentaire = request.data.get('commentaire', '')
-            role = str(getattr(request.user, 'role', '')).upper().strip()
+            role = str(getattr(user, 'role', '')).upper().strip()
+            code_service = str(getattr(getattr(user, 'service', None), 'code', '') or '').upper()
 
-            if demande.statut in ['EN_ATTENTE_RH', 'EN_ATTENTE_SANTE'] or role in ['RH', 'ADMIN_RH', 'DIRECTEUR', 'ADMIN', 'SUPERADMIN'] or request.user.is_superuser:
+            est_chef_rh = (
+                getattr(user, 'est_rh_general', False)
+                or user.is_superuser
+                or role in ['ADMIN', 'SUPERADMIN']
+                or (role in ['CHEF_SERVICE', 'CHEF'] and 'RH' in code_service)
+            )
+
+            # CAS 1 : Validation N1 par le Chef de Service (Non-RH)
+            if demande.statut == 'EN_ATTENTE_CHEF' and role in ['CHEF_SERVICE', 'CHEF']:
+                demande.statut = 'EN_ATTENTE_RH'
+                demande.save()
+
+                EtapeValidation.objects.create(
+                    demande=demande,
+                    validateur=user,
+                    role_validateur='CHEF_SERVICE',
+                    decision='ACCORDE',
+                    commentaire=commentaire
+                )
+                return Response({'status': 'Validation N1 effectuée. Transmise au RH.'}, status=status.HTTP_200_OK)
+
+            # CAS 2 : Validation Finale N2 réservée exclusivement au Chef RH Général (ou Admin)
+            elif demande.statut in ['EN_ATTENTE_RH', 'EN_ATTENTE_SANTE'] and est_chef_rh:
                 demande.statut = 'VALIDEE'
 
-                libelle_type = getattr(demande.type_conge, 'libelle', '').lower()
+                code_type = str(getattr(demande.type_conge, 'code', '') or '').upper().strip()
+                libelle_type = str(getattr(demande.type_conge, 'libelle', '') or '').lower().strip()
 
-                if 'annuel' in libelle_type or 'administratif' in libelle_type:
+                if 'ANNUEL' in code_type or 'ADMINISTRATIF' in code_type or 'annuel' in libelle_type or 'administratif' in libelle_type:
                     annee_actuelle = demande.date_debut.year if demande.date_debut else datetime.now().year
                     solde, _ = SoldeConge.objects.get_or_create(
                         utilisateur=demande.utilisateur,
                         annee=annee_actuelle,
                         defaults={'droits_acquis': 22.0, 'jours_reportes': 0.0, 'jours_consommes': 0.0}
                     )
-                    solde.jours_consommes += demande.nombre_jours
+                    solde.jours_consommes = float(solde.jours_consommes) + float(demande.nombre_jours)
                     solde.save()
 
-                elif 'pelerinage' in libelle_type or 'hajj' in libelle_type:
+                elif 'HAJJ' in code_type or 'PELERINAGE' in code_type or 'pelerinage' in libelle_type or 'hajj' in libelle_type:
                     agent = demande.utilisateur
                     if hasattr(agent, 'a_fait_pelerinage'):
                         agent.a_fait_pelerinage = True
                         agent.save()
 
-            elif role in ['CHEF_SERVICE', 'CHEF']:
-                demande.statut = 'EN_ATTENTE_RH'
+                demande.save()
 
-            demande.save()
+                EtapeValidation.objects.create(
+                    demande=demande,
+                    validateur=user,
+                    role_validateur='RH_GENERAL',
+                    decision='ACCORDE',
+                    commentaire=commentaire
+                )
 
-            EtapeValidation.objects.create(
-                demande=demande,
-                validateur=request.user,
-                role_validateur=role or 'RH',
-                decision='ACCORDE',
-                commentaire=commentaire
-            )
+                return Response({'status': 'Demande validée définitivement par le RH Général'}, status=status.HTTP_200_OK)
 
-            return Response({'status': 'Demande validée avec succès'}, status=status.HTTP_200_OK)
+            return Response({'error': 'Seul le Chef RH Général peut effectuer la validation finale.'}, status=status.HTTP_403_FORBIDDEN)
 
         except Exception as e:
             print("=== ERREUR VALIDATION BACKEND ===")
@@ -172,16 +255,29 @@ class DemandeCongeViewSet(viewsets.ModelViewSet):
     def refuser(self, request, pk=None):
         try:
             demande = self.get_object()
+            user = request.user
             commentaire = request.data.get('commentaire', '')
-            role = str(getattr(request.user, 'role', '')).upper().strip()
+            role = str(getattr(user, 'role', '')).upper().strip()
+            code_service = str(getattr(getattr(user, 'service', None), 'code', '') or '').upper()
 
-            demande.statut = 'REFUSEE_RH' if role in ['RH', 'ADMIN_RH', 'DIRECTEUR', 'ADMIN', 'SUPERADMIN'] or request.user.is_superuser else 'REFUSEE_CHEF'
+            est_chef = role in ['CHEF_SERVICE', 'CHEF'] and demande.statut == 'EN_ATTENTE_CHEF'
+            est_chef_rh = (
+                getattr(user, 'est_rh_general', False)
+                or user.is_superuser
+                or role in ['ADMIN', 'SUPERADMIN']
+                or (role in ['CHEF_SERVICE', 'CHEF'] and 'RH' in code_service)
+            ) and demande.statut in ['EN_ATTENTE_RH', 'EN_ATTENTE_SANTE']
+
+            if not est_chef and not est_chef_rh:
+                return Response({'error': 'Non autorisé à refuser cette demande.'}, status=status.HTTP_403_FORBIDDEN)
+
+            demande.statut = 'REFUSEE_RH' if est_chef_rh else 'REFUSEE_CHEF'
             demande.save()
 
             EtapeValidation.objects.create(
                 demande=demande,
-                validateur=request.user,
-                role_validateur=role or 'RH',
+                validateur=user,
+                role_validateur='RH_GENERAL' if est_chef_rh else 'CHEF_SERVICE',
                 decision='REFUSE',
                 commentaire=commentaire
             )
@@ -193,28 +289,34 @@ class DemandeCongeViewSet(viewsets.ModelViewSet):
             traceback.print_exc()
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    @action(detail=True, methods=['post', 'patch'])
+    @action(detail=True, methods=['post', 'patch', 'put'])
     def annuler(self, request, pk=None):
+        """Permet l'annulation par l'employé, le chef ou le RH Général."""
         try:
             demande = self.get_object()
             user = request.user
             role = str(getattr(user, 'role', '')).upper().strip()
+            code_service = str(getattr(getattr(user, 'service', None), 'code', '') or '').upper()
 
-            est_proprietaire = (demande.utilisateur == user)
+            est_proprietaire = (demande.utilisateur_id == user.id)
 
-            service_user = getattr(user, 'service_id', None)
-            service_demandeur = getattr(demande.utilisateur, 'service_id', None)
+            service_user_id = getattr(user, 'service_id', None) or getattr(getattr(user, 'service', None), 'id', None)
+            service_demandeur_id = getattr(demande.utilisateur, 'service_id', None) or getattr(getattr(demande.utilisateur, 'service', None), 'id', None)
 
-            meme_service = (service_user is not None and service_user == service_demandeur) or (
-                hasattr(user, 'service') and user.service and hasattr(demande.utilisateur, 'service') and user.service == demande.utilisateur.service
-            )
+            meme_service = (service_user_id is not None and service_user_id == service_demandeur_id)
 
             est_chef_du_demandeur = (role in ['CHEF_SERVICE', 'CHEF'] and meme_service)
-            est_admin_or_rh = role in ['RH', 'ADMIN_RH', 'DIRECTEUR', 'ADMIN', 'SUPERADMIN'] or user.is_superuser
+            
+            est_chef_rh = (
+                getattr(user, 'est_rh_general', False)
+                or user.is_superuser
+                or role in ['ADMIN', 'SUPERADMIN']
+                or (role in ['CHEF_SERVICE', 'CHEF'] and 'RH' in code_service)
+            )
 
-            chef_autorise = est_chef_du_demandeur and demande.statut in ['EN_ATTENTE_CHEF', 'EN_ATTENTE_RH']
+            chef_autorise = est_chef_du_demandeur and demande.statut in ['EN_ATTENTE_CHEF', 'EN_ATTENTE_RH', 'VALIDEE', 'VALIDE']
 
-            if not est_proprietaire and not chef_autorise and not est_admin_or_rh:
+            if not est_proprietaire and not chef_autorise and not est_chef_rh:
                 return Response({'error': 'Action non autorisée sur cette demande.'}, status=status.HTTP_403_FORBIDDEN)
 
             statuts_en_cours = ['EN_ATTENTE_CHEF', 'EN_ATTENTE_SANTE', 'EN_ATTENTE_RH']
@@ -223,18 +325,20 @@ class DemandeCongeViewSet(viewsets.ModelViewSet):
             if demande.statut not in statuts_en_cours and not statut_valide:
                 return Response({'error': 'Cette demande ne peut plus être annulée.'}, status=status.HTTP_400_BAD_REQUEST)
 
-            if statut_valide and demande.date_debut <= date.today():
+            if est_proprietaire and not est_chef_du_demandeur and not est_chef_rh and statut_valide and demande.date_debut <= date.today():
                 return Response({'error': 'Impossible d\'annuler un congé déjà commencé ou passé.'}, status=status.HTTP_400_BAD_REQUEST)
 
-            libelle_type = getattr(demande.type_conge, 'libelle', '').lower()
-            if statut_valide and ('annuel' in libelle_type or 'administratif' in libelle_type):
+            code_type = str(getattr(demande.type_conge, 'code', '') or '').upper().strip()
+            libelle_type = str(getattr(demande.type_conge, 'libelle', '') or '').lower().strip()
+
+            if statut_valide and ('ANNUEL' in code_type or 'ADMINISTRATIF' in code_type or 'annuel' in libelle_type or 'administratif' in libelle_type):
                 annee_actuelle = demande.date_debut.year
                 solde = SoldeConge.objects.filter(utilisateur=demande.utilisateur, annee=annee_actuelle).first()
                 if solde:
                     solde.jours_consommes = max(0.0, float(solde.jours_consommes) - float(demande.nombre_jours))
                     solde.save()
 
-            if statut_valide and ('pelerinage' in libelle_type or 'hajj' in libelle_type):
+            if statut_valide and ('HAJJ' in code_type or 'PELERINAGE' in code_type or 'pelerinage' in libelle_type or 'hajj' in libelle_type):
                 agent = demande.utilisateur
                 if hasattr(agent, 'a_fait_pelerinage'):
                     agent.a_fait_pelerinage = False
@@ -243,21 +347,27 @@ class DemandeCongeViewSet(viewsets.ModelViewSet):
             demande.statut = 'ANNULEE'
             demande.save()
 
-            role_actuel = 'CHEF' if (est_chef_du_demandeur and not est_proprietaire) else ('RH' if est_admin_or_rh and not est_proprietaire else 'EMPLOYE')
+            role_actuel = 'CHEF' if (est_chef_du_demandeur and not est_proprietaire) else ('RH' if est_chef_rh and not est_proprietaire else 'EMPLOYE')
+            
+            commentaire_motif = request.data.get('commentaire', f"Demande annulée par {user.get_full_name() or user.username}.")
+            
             EtapeValidation.objects.create(
                 demande=demande,
                 validateur=user,
                 role_validateur=role_actuel,
                 decision='ANNULEE',
-                commentaire=f"Demande annulée par {user.get_full_name() or user.username}."
+                commentaire=commentaire_motif
             )
 
             return Response({'status': 'Demande annulée avec succès.'}, status=status.HTTP_200_OK)
 
         except Exception as e:
+            print("=== ERREUR ANNULATION BACKEND ===")
+            traceback.print_exc()
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+# 🏢 CORRECTION DE SOLDE
 class CorrectionSoldeViewSet(viewsets.ModelViewSet):
     queryset = CorrectionSolde.objects.all()
     serializer_class = CorrectionSoldeSerializer
@@ -279,6 +389,7 @@ class CorrectionSoldeViewSet(viewsets.ModelViewSet):
                 pass
 
 
+# 🏢 HISTORIQUE DES ÉTAPES DE VALIDATION
 class EtapeValidationViewSet(viewsets.ModelViewSet):
     queryset = EtapeValidation.objects.all()
     serializer_class = EtapeValidationSerializer

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useLocation } from "react-router-dom";
 import api from "../../api/axios";
 import MainLayout from "../../components/MainLayout";
 import { Icone, I } from "../../components/icons";
@@ -43,6 +43,7 @@ function BadgeStatut({ statut }) {
 export default function AgentHistorique() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const [agents, setAgents] = useState([]);
   const [selectedAgentId, setSelectedAgentId] = useState(id || "");
   const [currentUserId, setCurrentUserId] = useState(null);
@@ -53,6 +54,9 @@ export default function AgentHistorique() {
   const [statusFilter, setStatusFilter] = useState("TOUS");
   const [chargement, setChargement] = useState(true);
   const [erreur, setErreur] = useState("");
+
+  const isRhSpace = location.pathname.startsWith("/rh");
+  const basePath = isRhSpace ? "/rh/agents" : "/chef/agents";
 
   useEffect(() => {
     api.get("/users/me/").then(({ data }) => {
@@ -95,6 +99,12 @@ export default function AgentHistorique() {
   const estAnnulable = (demande) => {
     const { statut, date_debut } = demande;
     if (statut === "ANNULEE" || statut?.startsWith("REFUSEE")) return false;
+
+    const codeType = String(demande.type_conge_code || demande.type_conge?.code || "").toUpperCase();
+    const libelleType = String(demande.type_conge_libelle || demande.type_conge?.libelle || "").toLowerCase();
+    const estMaladie = codeType.includes("MAL") || libelleType.includes("maladie");
+
+    if (estMaladie) return true;
     if (statut?.startsWith("EN_ATTENTE")) return true;
     if (statut === "VALIDE" || statut === "VALIDEE") {
       const aujourdhui = new Date();
@@ -106,17 +116,44 @@ export default function AgentHistorique() {
     return false;
   };
 
+  // Annulation directe via l'action dédiée /annuler/
   const handleAnnulerDemande = async (demandeId) => {
     if (!window.confirm("Êtes-vous sûr de vouloir annuler cette demande de congé ?")) return;
+
     try {
-      await api.post(`/demandes/${demandeId}/annuler/`);
+      await api.post(`/demandes/${demandeId}/annuler/`, {
+        commentaire: "Annulation effectuée depuis l'historique agent."
+      });
       chargerDonneesAgent();
     } catch (err) {
-      alert(err.response?.data?.error || "Une erreur est survenue lors de l'annulation.");
+      const messageErreur =
+        err.response?.data?.error ||
+        err.response?.data?.detail ||
+        "Impossible d'annuler cette demande ou action non autorisée.";
+      alert(messageErreur);
     }
   };
 
-  // Calculs synthétiques pour les 2 champs spéciaux
+  const handleToggleContreVisite = async (demandeId, contreVisiteActuelle) => {
+    const nouveauStatut = !contreVisiteActuelle;
+
+    setDemandes((prev) =>
+      prev.map((item) =>
+        item.id === demandeId
+          ? { ...item, contre_visite_effectuee: nouveauStatut }
+          : item
+      )
+    );
+
+    try {
+      await api.patch(`/demandes/${demandeId}/`, {
+        contre_visite_effectuee: nouveauStatut,
+      });
+    } catch (err) {
+      console.warn("Champ non synchronisé avec le serveur :", err);
+    }
+  };
+
   const statsMaladie = useMemo(() => {
     let joursMaladieOrdinaire = 0;
     let joursMaladieSpeciale = 0;
@@ -127,12 +164,13 @@ export default function AgentHistorique() {
       const isValideOuAttente = d.statut === "VALIDE" || d.statut === "VALIDEE" || d.statut?.startsWith("EN_ATTENTE");
       if (!isValideOuAttente) return;
 
-      const code = (d.type_conge_code || "").toUpperCase();
-      const libelle = (d.type_conge_libelle || d.type_conge?.libelle || "").toLowerCase();
+      const code = String(d.type_conge_code || d.type_conge?.code || "").toUpperCase();
+      const libelle = String(d.type_conge_libelle || d.type_conge?.libelle || d.type_conge?.nom || d.type_conge || "").toLowerCase();
+      const motif = String(d.motif || "").toLowerCase();
       const nbrJours = Number(d.nombre_jours) || 0;
 
-      const isMaladie = code === "MALADIE" || libelle.includes("maladie");
-      const isSpeciale = code === "MALADIE_SPECIALE" || libelle.includes("spécial") || libelle.includes("special") || nbrJours > 4;
+      const isMaladie = code.includes("MALADIE") || code.includes("MAL") || libelle.includes("maladie") || motif.includes("maladie");
+      const isSpeciale = code.includes("SPECIAL") || code.includes("LONGUE") || libelle.includes("spécial") || libelle.includes("special") || libelle.includes("longue") || nbrJours > 4;
 
       if (isMaladie) {
         if (isSpeciale) {
@@ -185,7 +223,14 @@ export default function AgentHistorique() {
           </button>
           {agents.length > 0 && (
             <label className="flex items-center gap-3 text-xs font-bold uppercase tracking-wide text-slate-500">Agent
-              <select value={selectedAgentId} onChange={(e) => { setSelectedAgentId(e.target.value); navigate(`/chef/agents/${e.target.value}/historique`); }} className="rounded-xl border border-[#00efff]/40 bg-[#e7ffff] px-3 py-2 text-sm font-bold normal-case text-[#3c0038] outline-none focus:ring-2 focus:ring-[#00efff]">
+              <select 
+                value={selectedAgentId} 
+                onChange={(e) => { 
+                  setSelectedAgentId(e.target.value); 
+                  navigate(`${basePath}/${e.target.value}/historique`); 
+                }} 
+                className="rounded-xl border border-[#00efff]/40 bg-[#e7ffff] px-3 py-2 text-sm font-bold normal-case text-[#3c0038] outline-none focus:ring-2 focus:ring-[#00efff]"
+              >
                 {agents.map((item) => <option key={item.id} value={item.id}>{nomAgent(item, `Agent #${item.id}`)}</option>)}
               </select>
             </label>
@@ -213,7 +258,6 @@ export default function AgentHistorique() {
               </div>
             </header>
 
-            {/* Statistiques générales */}
             <section className="grid gap-4 sm:grid-cols-3">
               <div className="rounded-2xl border border-[#00efff]/30 bg-[#e7ffff] p-5">
                 <p className="text-xs font-bold uppercase tracking-wide text-[#0097ff]">Demandes</p>
@@ -232,9 +276,8 @@ export default function AgentHistorique() {
               </div>
             </section>
 
-            {/* CHAMPS SPÉCIAUX : Congé Maladie & Congé Maladie Spécial */}
             <section className="grid gap-4 sm:grid-cols-2">
-              <div className="flex items-center justify-between rounded-2xl border border-rose-200 bg-rose-50/50 p-5 shadow-sm transition hover:border-rose-300">
+              <div className="flex items-center justify-between rounded-2xl border border-rose-200 bg-rose-50/50 p-5 shadow-sm">
                 <div className="space-y-1">
                   <div className="flex items-center gap-2">
                     <span className="h-2.5 w-2.5 rounded-full bg-rose-500" />
@@ -246,7 +289,7 @@ export default function AgentHistorique() {
                     {statsMaladie.joursMaladieOrdinaire} <span className="text-xs font-medium text-rose-700">jours suivis</span>
                   </p>
                   <p className="text-xs text-rose-600">
-                    {statsMaladie.nbArretsOrdinaires} arrêt(s) ordinaire(s) enregistré(s)
+                    {statsMaladie.nbArretsOrdinaires} arrêt(s) ordinaire(s)
                   </p>
                 </div>
                 <span className="grid h-12 w-12 place-items-center rounded-2xl bg-rose-100 text-rose-700">
@@ -254,10 +297,10 @@ export default function AgentHistorique() {
                 </span>
               </div>
 
-              <div className="flex items-center justify-between rounded-2xl border border-amber-200 bg-amber-50/60 p-5 shadow-sm transition hover:border-amber-300">
+              <div className="flex items-center justify-between rounded-2xl border border-amber-200 bg-amber-50/60 p-5 shadow-sm">
                 <div className="space-y-1">
                   <div className="flex items-center gap-2">
-                    <span className="h-2.5 w-2.5 rounded-full bg-amber-500 animate-pulse" />
+                    <span className="h-2.5 w-2.5 rounded-full bg-amber-500" />
                     <p className="text-xs font-bold uppercase tracking-wider text-amber-900">
                       Congé Maladie Spécial / Longue Durée
                     </p>
@@ -266,7 +309,7 @@ export default function AgentHistorique() {
                     {statsMaladie.joursMaladieSpeciale} <span className="text-xs font-medium text-amber-700">jours suivis</span>
                   </p>
                   <p className="text-xs text-amber-700 font-medium">
-                    {statsMaladie.nbArretsSpeciaux} dossier(s) &gt; 4j ou à statut spécial
+                    {statsMaladie.nbArretsSpeciaux} dossier(s) &gt; 4j ou statut spécial
                   </p>
                 </div>
                 <span className="grid h-12 w-12 place-items-center rounded-2xl bg-amber-100 text-amber-800">
@@ -275,90 +318,11 @@ export default function AgentHistorique() {
               </div>
             </section>
 
-            <section className="space-y-4">
-              <h2 className="text-lg font-black text-[#3c0038]">Soldes de congé</h2>
-              {soldes.length === 0 ? (
-                <div className="rounded-2xl border border-dashed border-[#00efff]/50 bg-[#e7ffff]/50 p-8 text-center text-sm text-slate-500">
-                  Aucun solde enregistré pour cet agent.
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  {soldes.map((s) => {
-                    const acquis = s.droits_acquis || 21;
-                    const consommes = s.jours_consommes || 0;
-                    const restants = Math.round(s.solde_actuel ?? s.solde ?? 0);
-                    const pourcentageRestant = Math.min(100, Math.max(0, (restants / (acquis || 1)) * 100));
-
-                    return (
-                      <div key={s.id} className="overflow-hidden rounded-2xl border border-[#00efff]/30 bg-white shadow-sm">
-                        <div className="flex flex-col gap-3 border-b border-[#00efff]/20 bg-[#e7ffff]/40 px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
-                          <div className="flex items-center gap-3">
-                            <span className="rounded-xl bg-[#3c0038] px-3 py-1 text-xs font-black text-white">
-                              ANNÉE {s.annee}
-                            </span>
-                            <span className="text-xs font-bold text-slate-500">
-                              Droits annuels attribués
-                            </span>
-                          </div>
-                          <span className="rounded-full bg-[#e7ffff] border border-[#00efff]/40 px-3 py-1 text-xs font-bold text-[#0097ff]">
-                            {acquis} jours acquis
-                          </span>
-                        </div>
-
-                        <div className="grid grid-cols-2 gap-4 p-6 md:grid-cols-4">
-                          <div className="border-r border-slate-100 pr-4 last:border-0">
-                            <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Solde restant</p>
-                            <p className="mt-1 text-3xl font-black text-[#3c0038]">
-                              {restants} <span className="text-sm font-medium text-slate-500">jours</span>
-                            </p>
-                          </div>
-
-                          <div className="border-r border-slate-100 pr-4 last:border-0">
-                            <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Jours consommés</p>
-                            <p className="mt-1 text-3xl font-black text-[#93003f]">
-                              {consommes} <span className="text-sm font-medium text-slate-500">jours</span>
-                            </p>
-                          </div>
-
-                          <div className="border-r border-slate-100 pr-4 last:border-0">
-                            <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Jours reportés</p>
-                            <p className="mt-1 text-3xl font-black text-[#0097ff]">
-                              {s.jours_reportes || 0} <span className="text-sm font-medium text-slate-500">jours</span>
-                            </p>
-                          </div>
-
-                          <div>
-                            <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Jours acquis</p>
-                            <p className="mt-1 text-3xl font-black text-slate-700">
-                              {acquis} <span className="text-sm font-medium text-slate-500">jours</span>
-                            </p>
-                          </div>
-                        </div>
-
-                        <div className="px-6 pb-5">
-                          <div className="flex justify-between text-xs font-semibold text-slate-500 mb-1.5">
-                            <span>Disponibilité du solde</span>
-                            <span>{Math.round(pourcentageRestant)}% restant</span>
-                          </div>
-                          <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
-                            <div
-                              className="h-full rounded-full bg-gradient-to-r from-[#0097ff] to-[#93003f] transition-all duration-500"
-                              style={{ width: `${pourcentageRestant}%` }}
-                            />
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </section>
-
             <section className="space-y-3">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
                 <div>
                   <h2 className="text-lg font-black text-[#3c0038]">Historique des demandes</h2>
-                  <p className="text-sm text-slate-500">Consultez et filtrez les demandes de cet agent.</p>
+                  <p className="text-sm text-slate-500">Gérez les demandes, pièces jointes et contre-visites.</p>
                 </div>
                 <div className="flex flex-col gap-2 sm:flex-row">
                   <div className="relative">
@@ -367,7 +331,6 @@ export default function AgentHistorique() {
                       value={query}
                       onChange={(e) => setQuery(e.target.value)}
                       placeholder="Rechercher une demande…"
-                      aria-label="Rechercher une demande"
                       className="w-full rounded-xl border border-[#00efff]/40 bg-white py-2.5 pl-9 pr-3 text-sm outline-none transition focus:border-[#0097ff] focus:ring-2 focus:ring-[#00efff]/40"
                     />
                   </div>
@@ -388,38 +351,38 @@ export default function AgentHistorique() {
               <div className="overflow-hidden rounded-2xl border border-[#00efff]/30 bg-white shadow-sm">
                 {filteredDemandes.length === 0 ? (
                   <div className="p-10 text-center text-sm text-slate-500">
-                    Aucune demande ne correspond à votre recherche.
+                    Aucune demande trouvée.
                   </div>
                 ) : (
                   <div className="overflow-x-auto">
-                    <table className="w-full min-w-[760px] text-left text-sm text-slate-600">
+                    <table className="w-full min-w-[850px] text-left text-sm text-slate-600">
                       <thead className="bg-[#e7ffff] text-[11px] font-black uppercase tracking-wide text-[#0097ff]">
                         <tr>
                           <th className="px-5 py-4">Type</th>
                           <th className="px-5 py-4">Période</th>
                           <th className="px-5 py-4">Durée</th>
                           <th className="px-5 py-4">Statut</th>
-                          <th className="px-5 py-4">Motif</th>
+                          <th className="px-5 py-4">Certificat / Document</th>
+                          <th className="px-5 py-4">Contre-visite RH</th>
                           <th className="px-5 py-4 text-right">Actions</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-[#00efff]/15">
                         {filteredDemandes.map((d) => {
-                          const libelleType = d.type_conge_libelle || d.type_conge?.libelle || "Congé";
-                          const codeType = (d.type_conge_code || "").toUpperCase();
+                          const libelleType = d.type_conge_libelle || d.type_conge?.libelle || d.type_conge?.nom || "Congé";
+                          const codeType = String(d.type_conge_code || d.type_conge?.code || "").toUpperCase();
                           const nbrJours = Number(d.nombre_jours) || 0;
                           
-                          // Détection si c'est une maladie de plus de 4 jours
-                          const estMaladie = codeType === "MALADIE" || libelleType.toLowerCase().includes("maladie");
-                          const estMaladieLongue = estMaladie && nbrJours > 4;
+                          const estMaladie = codeType.includes("MALADIE") || codeType.includes("MAL") || libelleType.toLowerCase().includes("maladie");
+                          const fichierUrl = d.justificatif || d.piece_jointe || d.document || d.fichier_medical || d.attestation;
 
                           return (
                             <tr key={d.id} className="transition hover:bg-[#e7ffff]/45">
                               <td className="px-5 py-4 font-bold text-[#3c0038]">
                                 {libelleType}
-                                {estMaladieLongue && (
+                                {estMaladie && nbrJours > 4 && (
                                   <span className="text-amber-800 font-semibold ml-1">
-                                    (cas spéciale)
+                                    (spécial)
                                   </span>
                                 )}
                               </td>
@@ -436,15 +399,63 @@ export default function AgentHistorique() {
                               <td className="px-5 py-4">
                                 <BadgeStatut statut={d.statut} />
                               </td>
-                              <td className="max-w-xs truncate px-5 py-4 text-slate-500">
-                                {d.motif || "—"}
+                              
+                              <td className="px-5 py-4">
+                                {fichierUrl ? (
+                                  <a
+                                    href={fichierUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="inline-flex items-center gap-1.5 rounded-lg border border-[#00efff]/60 bg-[#e7ffff] px-2.5 py-1 text-xs font-bold text-[#0097ff] hover:bg-[#0097ff] hover:text-white transition"
+                                  >
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                                    </svg>
+                                    Voir doc
+                                  </a>
+                                ) : (
+                                  <span className="text-xs text-slate-400">Aucun fichier</span>
+                                )}
                               </td>
+
+                              <td className="px-5 py-4">
+                                {estMaladie ? (
+                                  isRhSpace ? (
+                                    <label className="inline-flex items-center gap-2 cursor-pointer text-xs font-medium text-slate-700">
+                                      <input
+                                        type="checkbox"
+                                        checked={Boolean(d.contre_visite_effectuee)}
+                                        onChange={() => handleToggleContreVisite(d.id, d.contre_visite_effectuee)}
+                                        className="h-4 w-4 rounded border-slate-300 text-[#93003f] focus:ring-[#93003f]"
+                                      />
+                                      {d.contre_visite_effectuee ? (
+                                        <span className="text-emerald-700 font-bold">Vérifiée</span>
+                                      ) : (
+                                        <span className="text-slate-400">Non requise</span>
+                                      )}
+                                    </label>
+                                  ) : (
+                                    <span className="text-xs font-semibold">
+                                      {d.contre_visite_effectuee ? (
+                                        <span className="inline-flex items-center gap-1 text-emerald-700 font-bold">
+                                          ✓ Vérifiée par RH
+                                        </span>
+                                      ) : (
+                                        <span className="text-slate-400">Non vérifiée</span>
+                                      )}
+                                    </span>
+                                  )
+                                ) : (
+                                  <span className="text-xs text-slate-300">N/A</span>
+                                )}
+                              </td>
+
                               <td className="px-5 py-4 text-right">
                                 {estAnnulable(d) ? (
                                   <button
                                     onClick={() => handleAnnulerDemande(d.id)}
-                                    title="Annuler cette demande"
-                                    className="inline-flex items-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-bold text-rose-700 transition hover:bg-rose-100 hover:border-rose-300 focus:outline-none focus:ring-2 focus:ring-rose-400"
+                                    className="inline-flex items-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-bold text-rose-700 transition hover:bg-rose-100 hover:border-rose-300 focus:outline-none"
                                   >
                                     <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                                       <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />

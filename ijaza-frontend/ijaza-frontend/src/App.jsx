@@ -18,8 +18,11 @@ import DashboardChef from "./pages/chef/DashboardChef";
 import AgentHistorique from "./pages/chef/AgentHistorique";
 
 // Espace RH
+import DashboardRH from "./pages/rh/DashboardRH";
 import GlobalBalances from "./pages/rh/GlobalBalances";
 import RhPendingRequests from "./pages/rh/RhPendingRequests";
+import RhRequestDetail from "./pages/rh/RhRequestDetail";
+import RhHistory from "./pages/rh/RhHistory";
 import PlanningPage from "./pages/rh/PlanningPage";
 import Reports from "./pages/rh/Reports";
 
@@ -41,7 +44,7 @@ export default function App() {
         <Routes>
           <Route path="/login" element={<Login />} />
 
-          {/* 👤 Mon Profil (Personnel à l'utilisateur connecté) */}
+          {/* 👤 Mon Profil */}
           <Route
             path="/profil"
             element={
@@ -51,7 +54,7 @@ export default function App() {
             }
           />
 
-          {/* ⚙️ Paramètres d'espace (Mode sombre, Langue, etc.) */}
+          {/* ⚙️ Paramètres */}
           <Route
             path="/settings"
             element={
@@ -78,14 +81,15 @@ export default function App() {
 
           {/* 🏢 Espace RH */}
           <Route path="/rh" element={<ProtectedRoute rolesAutorises={["RH", "ADMIN_RH"]}><GlobalBalances /></ProtectedRoute>} />
+          <Route path="/rh/dashboard" element={<ProtectedRoute rolesAutorises={["RH", "ADMIN_RH"]}><DashboardRH /></ProtectedRoute>} />
           <Route path="/rh/validation" element={<ProtectedRoute rolesAutorises={["RH", "ADMIN_RH"]}><RhPendingRequests /></ProtectedRoute>} />
-          <Route path="/rh/demandes/:id" element={<ProtectedRoute rolesAutorises={["RH", "ADMIN_RH"]}><RequestDetail /></ProtectedRoute>} />
+          <Route path="/rh/demandes/:id" element={<ProtectedRoute rolesAutorises={["RH", "ADMIN_RH"]}><RhRequestDetail /></ProtectedRoute>} />
+          <Route path="/rh/historique-global" element={<ProtectedRoute rolesAutorises={["RH", "ADMIN_RH"]}><RhHistory /></ProtectedRoute>} />
           <Route path="/rh/nouvelle-demande" element={<ProtectedRoute rolesAutorises={["RH", "ADMIN_RH"]}><NewRequest /></ProtectedRoute>} />
-          <Route path="/rh/historique" element={<ProtectedRoute rolesAutorises={["RH", "ADMIN_RH"]}><History /></ProtectedRoute>} />
           <Route path="/rh/planning" element={<ProtectedRoute rolesAutorises={["RH", "ADMIN_RH"]}><PlanningPage /></ProtectedRoute>} />
           <Route path="/rh/rapports" element={<ProtectedRoute rolesAutorises={["RH", "ADMIN_RH"]}><Reports /></ProtectedRoute>} />
 
-          {/* 🛠️ Espace ADMIN (Strictement Gestion & Structure) */}
+          {/* 🛠️ Espace ADMIN */}
           <Route path="/admin" element={<Navigate to="/admin/dashboard" replace />} />
           <Route path="/admin/dashboard" element={<ProtectedRoute rolesAutorises={["ADMIN"]}><DashboardAdminPage /></ProtectedRoute>} />
           <Route path="/admin/employes" element={<ProtectedRoute rolesAutorises={["ADMIN"]}><EmployesPage /></ProtectedRoute>} />

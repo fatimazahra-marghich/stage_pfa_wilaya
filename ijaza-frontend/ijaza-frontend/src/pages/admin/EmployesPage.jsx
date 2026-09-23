@@ -153,8 +153,9 @@ export default function EmployesPage() {
     if (emp) {
       setEmpEnEdition(emp);
       
-      const srv = services.find((s) => String(s.id) === String(emp.service));
-      const divId = srv ? extraireId(srv.division) : "";
+      const srvId = extraireId(emp.service);
+      const srv = services.find((s) => String(s.id) === String(srvId));
+      const divId = extraireId(emp.division) || (srv ? extraireId(srv.division) : "");
 
       setForm({
         email: emp.email || "",
@@ -163,7 +164,7 @@ export default function EmployesPage() {
         password: "",
         role: emp.role || "EMPLOYE",
         division_id: divId || "",
-        service_id: emp.service || "",
+        service_id: srvId || "",
         solde_conge: emp.solde_actuel ?? emp.solde_conge ?? 22,
         is_active: emp.is_active ?? true,
       });
@@ -230,6 +231,7 @@ export default function EmployesPage() {
 
     const emailTrimmed = form.email.trim();
 
+    // Transmission explicite des champs division et service au backend
     const payload = {
       username: emailTrimmed,
       email: emailTrimmed,
@@ -238,11 +240,9 @@ export default function EmployesPage() {
       role: form.role,
       solde_conge: parseInt(form.solde_conge, 10),
       is_active: form.is_active,
+      division: form.division_id ? parseInt(form.division_id, 10) : null,
+      service: form.service_id ? parseInt(form.service_id, 10) : null,
     };
-
-    if (form.service_id) {
-      payload.service = parseInt(form.service_id, 10);
-    }
 
     if (form.password) {
       payload.password = form.password;
@@ -267,7 +267,7 @@ export default function EmployesPage() {
 
         Object.entries(apiData).forEach(([cle, val]) => {
           const message = Array.isArray(val) ? val.join(" ") : String(val);
-          if (["email", "first_name", "last_name", "password", "role", "service", "solde_conge"].includes(cle)) {
+          if (["email", "first_name", "last_name", "password", "role", "service", "division", "solde_conge"].includes(cle)) {
             champErreurs[cle] = message;
           } else {
             messagesLibres.push(`${cle}: ${message}`);
@@ -311,11 +311,11 @@ export default function EmployesPage() {
       const matchTexte = nomComplet.includes(q) || email.includes(q);
       const matchRole = filtreRole === "TOUS" || e.role === filtreRole;
 
-      const srvObj = services.find((s) => String(s.id) === String(e.service));
-      const divId = srvObj ? extraireId(srvObj.division) : null;
+      const srvId = extraireId(e.service);
+      const divId = extraireId(e.division) || (srvId ? extraireId(services.find((s) => String(s.id) === String(srvId))?.division) : null);
 
       const matchDiv = filtreDivision === "TOUS" || String(divId) === String(filtreDivision);
-      const matchSrv = filtreService === "TOUS" || String(e.service) === String(filtreService);
+      const matchSrv = filtreService === "TOUS" || String(srvId) === String(filtreService);
 
       return matchTexte && matchRole && matchDiv && matchSrv;
     });
@@ -485,6 +485,9 @@ export default function EmployesPage() {
                       const nomComplet = `${prenom} ${nom}`.trim();
                       const role = ROLES[emp.role] || ROLES.EMPLOYE;
 
+                      const divAssigne = divisions.find((d) => String(d.id) === String(extraireId(emp.division)))?.nom || emp.division_nom || "Non assignée";
+                      const srvAssigne = services.find((s) => String(s.id) === String(extraireId(emp.service)))?.nom || emp.service_nom || "Non assigné";
+
                       return (
                         <tr key={emp.id} className="transition hover:bg-[#e7ffff]/40">
                           <td className="px-5 py-4">
@@ -505,10 +508,10 @@ export default function EmployesPage() {
                           </td>
                           <td className="px-5 py-4 text-xs text-neutral-700">
                             <div className="font-semibold text-[#3c0038]">
-                              Division : {emp.division_nom || "Non assignée"}
+                              Division : {divAssigne}
                             </div>
                             <div className="text-neutral-500">
-                              Service : {emp.service_nom || "Non assigné"}
+                              Service : {srvAssigne}
                             </div>
                           </td>
                           <td className="px-5 py-4 text-sm font-semibold text-neutral-700">

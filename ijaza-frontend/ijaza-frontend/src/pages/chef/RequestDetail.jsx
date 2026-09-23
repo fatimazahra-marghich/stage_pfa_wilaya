@@ -5,12 +5,6 @@ import MainLayout from "../../components/MainLayout";
 import StatutBadge from "../../components/StatutBadge";
 import { Icone, I } from "../../components/icons";
 
-/* ------------------------------------------------------------------ */
-/* Palette du projet                                                   */
-/*   #3c0038 prune · #93003f bordeaux · #0097ff bleu                   */
-/*   #00efff cyan  · #e7ffff cyan pâle                                 */
-/* ------------------------------------------------------------------ */
-
 function sePeuventChevaucher(d1, f1, d2, f2) {
   if (!d1 || !f1 || !d2 || !f2) return false;
   return new Date(d1) <= new Date(f2) && new Date(d2) <= new Date(f1);
@@ -42,12 +36,11 @@ export default function RequestDetail() {
       try {
         const { data: d } = await api.get(`/demandes/${id}/`);
         if (Number(d.nombre_jours) <= 0) {
-        setErreur("Cette demande est invalide (durée de 0 jour).");
-        return;
-      }
+          setErreur("Cette demande est invalide (durée de 0 jour).");
+          return;
+        }
         setDemande(d);
 
-        // Récupérer les demandes de l'équipe pour vérifier les chevauchements
         const { data: equipe } = await api.get("/demandes/");
         const liste = equipe.results ?? equipe ?? [];
         
@@ -72,17 +65,26 @@ export default function RequestDetail() {
   }, [id]);
 
   async function traiter(decision) {
-    const estRefus = decision.startsWith("REFUS");
-    if (estRefus && !commentaire.trim()) {
+    if (decision === "REFUSE" && !commentaire.trim()) {
       alert("Un commentaire est obligatoire en cas de refus.");
       return;
     }
+
     setEnvoi(true);
     try {
-      const endpoint = estRefus
-        ? `/demandes/${id}/refuser/`
-        : `/demandes/${id}/valider/`;
-      await api.post(endpoint, { commentaire });
+      let endpoint = `/demandes/${id}/valider/`;
+      let payload = { commentaire };
+
+      if (decision === "REFUSE") {
+        endpoint = `/demandes/${id}/refuser/`;
+      } else if (decision === "CONTRE_VISITE") {
+        endpoint = `/demandes/${id}/demander-contre-visite/`;
+        payload = {
+          commentaire: commentaire || "Demande de contre-visite ordonnée par le Chef de service.",
+        };
+      }
+
+      await api.post(endpoint, payload);
       alert("Décision enregistrée avec succès !");
       navigate(-1);
     } catch (err) {
@@ -93,7 +95,6 @@ export default function RequestDetail() {
     }
   }
 
-  // Écran de chargement corrigé (MainLayout au lieu de Layout)
   if (!demande && !erreur) {
     return (
       <MainLayout>
@@ -134,12 +135,22 @@ export default function RequestDetail() {
 
   const nom = nomComplet(demande);
   const idUtilisateur = demande.utilisateur?.id || demande.utilisateur;
-  const typeCongeLibelle =
+
+  let typeCongeLibelle =
     demande.type_conge_libelle ||
     demande.type_conge_details?.libelle ||
     demande.type_conge_code ||
     demande.type_conge ||
     "Congé";
+
+  if (typeCongeLibelle.includes("Exceptionnel / Maladie")) {
+    typeCongeLibelle = "Congé Exceptionnel";
+  }
+
+  const code = String(demande.type_conge_code || demande.type_conge || "").toUpperCase();
+  const libelle = String(typeCongeLibelle).toUpperCase();
+  const estMaladiePure = (code.includes("MALADIE") || libelle.includes("MALADIE")) && !libelle.includes("EXCEPTIONNEL");
+  const estMaladieLongue = estMaladiePure && Number(demande.nombre_jours) > 4;
 
   return (
     <MainLayout>
@@ -219,7 +230,6 @@ export default function RequestDetail() {
               </dl>
             </div>
 
-            {/* Bouton d'accès à l'historique complet de l'agent */}
             <div className="mt-6 border-t border-slate-100 pt-4">
               <button
                 type="button"
@@ -233,35 +243,49 @@ export default function RequestDetail() {
           </div>
 
           {/* Informations du congé */}
-          <div className="rounded-2xl border border-[#00efff]/30 bg-white p-6 shadow-sm">
-            <h2 className="mb-4 font-bold text-[#3c0038]">Informations du congé</h2>
-            <div className="grid grid-cols-2 gap-4 text-sm">
-              <div>
-                <p className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-                  Date de départ
-                </p>
-                <p className="font-medium text-slate-700">{demande.date_debut}</p>
+          <div className="rounded-2xl border border-[#00efff]/30 bg-white p-6 shadow-sm flex flex-col justify-between">
+            <div>
+              <h2 className="mb-4 font-bold text-[#3c0038]">Informations du congé</h2>
+              <div className="grid grid-cols-2 gap-4 text-sm">
+                <div>
+                  <p className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                    Date de départ
+                  </p>
+                  <p className="font-medium text-slate-700">{demande.date_debut}</p>
+                </div>
+                <div>
+                  <p className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                    Date de retour
+                  </p>
+                  <p className="font-medium text-slate-700">{demande.date_fin}</p>
+                </div>
               </div>
-              <div>
-                <p className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-                  Date de retour
-                </p>
-                <p className="font-medium text-slate-700">{demande.date_fin}</p>
+              <div className="mt-4 flex items-center gap-3 rounded-xl bg-[#e7ffff] px-4 py-3">
+                <span className="grid h-9 w-9 place-items-center rounded-lg bg-white text-[#0097ff]">
+                  <Icone d={I.horloge} className="h-4 w-4" />
+                </span>
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                    Durée demandée
+                  </p>
+                  <p className="font-bold text-[#93003f]">
+                    {demande.nombre_jours} jour{demande.nombre_jours > 1 ? "s" : ""}
+                  </p>
+                </div>
               </div>
             </div>
-            <div className="mt-4 flex items-center gap-3 rounded-xl bg-[#e7ffff] px-4 py-3">
-              <span className="grid h-9 w-9 place-items-center rounded-lg bg-white text-[#0097ff]">
-                <Icone d={I.horloge} className="h-4 w-4" />
-              </span>
-              <div>
-                <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-                  Durée demandée
+
+            {/* Avertissement si maladie > 4 jours */}
+            {estMaladieLongue && (
+              <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3.5 text-xs text-amber-900">
+                <p className="font-bold flex items-center gap-1.5">
+                  <span>⚠️</span> Réglementation Contre-Visite Médicale
                 </p>
-                <p className="font-bold text-[#93003f]">
-                  {demande.nombre_jours} jour{demande.nombre_jours > 1 ? "s" : ""}
+                <p className="mt-1 text-amber-800">
+                  Cet arrêt dépasse 4 jours. Vous pouvez solliciter un contrôle médical de l'agent en transférant le dossier à la RH via l'option dédiée.
                 </p>
               </div>
-            </div>
+            )}
           </div>
         </div>
 
@@ -300,7 +324,7 @@ export default function RequestDetail() {
           </div>
         )}
 
-        {/* Décision */}
+        {/* Décision du Chef de Service */}
         {estEnAttente && (
           <div className="rounded-2xl border border-[#00efff]/30 bg-white p-6 shadow-sm">
             <h2 className="mb-4 font-bold text-[#3c0038]">
@@ -316,16 +340,27 @@ export default function RequestDetail() {
             <div className="flex flex-col gap-3 sm:flex-row">
               <button
                 disabled={envoi}
-                onClick={() => traiter("VALIDEE")}
-                className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl bg-[#93003f] py-3 font-semibold text-white transition hover:bg-[#3c0038] disabled:opacity-50"
+                onClick={() => traiter("VALIDE")}
+                className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl bg-[#93003f] py-3 text-xs font-bold text-white transition hover:bg-[#3c0038] disabled:opacity-50 shadow-sm"
               >
                 <Icone d={I.valide} className="h-4 w-4" />
                 Valider la demande
               </button>
+
+              {estMaladieLongue && (
+                <button
+                  disabled={envoi}
+                  onClick={() => traiter("CONTRE_VISITE")}
+                  className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl bg-amber-600 py-3 text-xs font-bold text-white transition hover:bg-amber-700 disabled:opacity-50 shadow-sm"
+                >
+                  ⚠️ Demander une contre-visite (RH)
+                </button>
+              )}
+
               <button
                 disabled={envoi}
-                onClick={() => traiter("REFUSEE")}
-                className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl border border-slate-300 py-3 font-semibold text-slate-700 transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-700 disabled:opacity-50"
+                onClick={() => traiter("REFUSE")}
+                className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl border border-slate-300 py-3 text-xs font-bold text-slate-700 transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-700 disabled:opacity-50"
               >
                 <Icone d={I.refuser} className="h-4 w-4" />
                 Refuser

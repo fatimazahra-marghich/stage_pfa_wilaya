@@ -23,17 +23,28 @@ export default function DashboardEmploye() {
   useEffect(() => {
     async function charger() {
       setErreur(null);
+      setChargement(true);
+
       try {
-        const [{ data: soldes }, { data: demandesData }] = await Promise.all([
-          api.get("/soldes/"),
+        // Exécution sécurisée avec fallback en cas d'échec sur un des endpoints
+        const [resSoldes, resDemandes] = await Promise.allSettled([
+          api.get("/soldes/").catch(() => api.get("/soldes-conge/")),
           api.get("/demandes/mes-demandes/"),
         ]);
 
-        const soldeExtrait = Array.isArray(soldes) ? soldes[0] : (soldes?.results?.[0] ?? soldes);
-        setSolde(soldeExtrait ?? null);
+        if (resSoldes.status === "fulfilled" && resSoldes.value?.data) {
+          const soldes = resSoldes.value.data;
+          const soldeExtrait = Array.isArray(soldes) ? soldes[0] : (soldes?.results?.[0] ?? soldes);
+          setSolde(soldeExtrait ?? null);
+        }
 
-        const liste = demandesData?.results ?? demandesData ?? [];
-        setDemandes(Array.isArray(liste) ? liste.slice(0, 5) : []);
+        if (resDemandes.status === "fulfilled" && resDemandes.value?.data) {
+          const demandesData = resDemandes.value.data;
+          const liste = demandesData?.results ?? demandesData ?? [];
+          setDemandes(Array.isArray(liste) ? liste.slice(0, 5) : []);
+        } else if (resDemandes.status === "rejected") {
+          throw new Error("Impossible de charger les demandes.");
+        }
       } catch (error) {
         console.error("Erreur de chargement du tableau de bord :", error);
         setErreur("Impossible de charger vos données. Réessayez dans un instant.");
@@ -62,13 +73,15 @@ export default function DashboardEmploye() {
           : "Solde épuisé pour cette période.";
 
   function estUneMaladie(d) {
-    const code = d.type_conge_code || d.type_conge?.code || "";
-    const libelle = d.type_conge_libelle || d.type_conge?.libelle || "";
+    if (!d) return false;
+    if (d.est_maladie !== undefined) return d.est_maladie;
+
+    const code = String(d.type_conge_code || d.type_conge?.code || "").toUpperCase();
+    const libelle = String(d.type_conge_libelle || d.type_conge?.libelle || "").toLowerCase();
 
     return (
-      code === "MALADIE_COURTE" ||
-      code === "MALADIE" ||
-      libelle.toLowerCase().includes("maladie")
+      code.includes("MALADIE") ||
+      libelle.includes("maladie")
     );
   }
 
@@ -233,7 +246,9 @@ export default function DashboardEmploye() {
                 </div>
               ) : (
                 demandes.map((d) => {
-                  const estRefusee = String(d.statut).startsWith("REFUSEE");
+                  const estRefusee = String(d.statut || "").startsWith("REFUSEE");
+                  const libelleAffiche = d.type_conge_libelle || d.type_conge?.libelle || "Congé";
+
                   return (
                     <div
                       key={d.id}
@@ -243,9 +258,9 @@ export default function DashboardEmploye() {
                         <div className="space-y-1">
                           <div className="flex flex-wrap items-center gap-2">
                             <p className="font-bold text-[#3c0038]">
-                              {d.type_conge_libelle || d.type_conge?.libelle || "Congé"}
+                              {libelleAffiche}
                             </p>
-                            {estUneMaladie(d) && d.nombre_jours > 4 && (
+                            {(d.necessite_contre_visite || (estUneMaladie(d) && Number(d.nombre_jours) > 4)) && (
                               <span className="rounded-full bg-[#93003f]/10 px-2.5 py-0.5 text-[10px] font-semibold text-[#93003f]">
                                 Contre-visite possible
                               </span>

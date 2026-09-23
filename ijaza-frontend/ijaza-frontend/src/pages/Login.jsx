@@ -7,6 +7,8 @@ const REDIRECTION_PAR_ROLE = {
   CHEF_SERVICE: "/chef",
   RH: "/rh",
   ADMIN_RH: "/rh",
+  "RH Général": "/rh",
+  RH_GENERAL: "/rh",
   ADMIN: "/admin/employes",
 };
 
@@ -27,8 +29,14 @@ export default function Login() {
 
     try {
       const user = await login(email, password);
-      const userRole = user?.role === 'ADMIN_RH' ? 'RH' : user?.role;
-      navigate(REDIRECTION_PAR_ROLE[userRole] ?? "/");
+      
+      // Gestion spécifique RH sans toucher aux autres rôles
+      let userRole = user?.role;
+      if (userRole === 'ADMIN_RH' || userRole === 'RH Général' || userRole === 'RH_GENERAL') {
+        userRole = 'RH';
+      }
+
+      navigate(REDIRECTION_PAR_ROLE[userRole] ?? REDIRECTION_PAR_ROLE[user?.role] ?? "/");
     } catch (err) {
       setErreur(
         err.response?.data?.detail || "Adresse email ou mot de passe incorrect."

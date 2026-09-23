@@ -24,7 +24,6 @@ const I = {
   question: "M9.1 9a3 3 0 115.8 1c0 2-3 2-3 4M12 17h.01M12 22a10 10 0 100-20 10 10 0 000 20z",
   profil: "M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z",
   reglages: "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z",
-  agents: "M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z",
 };
 
 const LIENS_PAR_ROLE = {
@@ -58,10 +57,12 @@ const LIENS_PAR_ROLE = {
   ],
   RH: [
     {
-      titre: "Gestion des congés",
+      titre: "Espace RH",
       liens: [
-        { to: "/rh", label: "Vue globale des soldes", icone: I.soldes },
+        { to: "/rh/dashboard", label: "Tableau de bord RH", icone: I.tableau },
         { to: "/rh/validation", label: "Validation des demandes", icone: I.valider },
+        { to: "/rh/historique-global", label: "Historique Global", icone: I.historique },
+        { to: "/rh", label: "Vue globale des soldes", icone: I.soldes },
         { to: "/rh/planning", label: "Planning global", icone: I.calendrier },
         { to: "/rh/rapports", label: "Rapports statistiques", icone: I.rapport },
       ],
@@ -70,7 +71,6 @@ const LIENS_PAR_ROLE = {
       titre: "Mes congés",
       liens: [
         { to: "/rh/nouvelle-demande", label: "Nouvelle demande", icone: I.ajouter },
-        { to: "/rh/historique", label: "Mes demandes", icone: I.historique },
       ],
     },
   ],
@@ -178,7 +178,7 @@ export default function Sidebar({ onNavigate }) {
           </div>
         ))}
 
-        {/* Section Personnelle commune (Profil & Paramètres d'apparence/langue) */}
+        {/* Section Préférences */}
         <div className="mt-6 border-t border-slate-100 pt-4">
           <p className="px-3 pb-2 text-xs font-semibold text-slate-400">Préférences</p>
           <ul>

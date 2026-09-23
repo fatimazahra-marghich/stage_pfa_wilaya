@@ -23,7 +23,8 @@ export default function History() {
     setErreur(null);
 
     try {
-      const { data } = await api.get("/demandes/mes-demandes/");
+      const response = await api.get("/demandes/mes-demandes/");
+      const data = response.data;
       const list = Array.isArray(data) ? data : data?.results || [];
       setDemandes(list);
     } catch (err) {
@@ -54,7 +55,8 @@ export default function History() {
 
   const demandesFiltrees = useMemo(
     () =>
-      demandes.filter((d) => {
+      (Array.isArray(demandes) ? demandes : []).filter((d) => {
+        if (!d) return false;
         const statut = String(d.statut || "").toUpperCase();
         if (filtre === "TOUT") return true;
         if (filtre === "EN_ATTENTE") return statut.startsWith("EN_ATTENTE");
@@ -68,7 +70,8 @@ export default function History() {
   const compteur = useMemo(
     () =>
       FILTRES.reduce((acc, f) => {
-        acc[f.cle] = demandes.filter((d) => {
+        acc[f.cle] = (Array.isArray(demandes) ? demandes : []).filter((d) => {
+          if (!d) return false;
           const statut = String(d.statut || "").toUpperCase();
           if (f.cle === "TOUT") return true;
           if (f.cle === "EN_ATTENTE") return statut.startsWith("EN_ATTENTE");
@@ -170,6 +173,7 @@ export default function History() {
                   const statut = String(d.statut || "").toUpperCase();
                   const estRefusee = statut.startsWith("REFUSEE") || statut === "REFUSE";
                   const peutEtreAnnulee = statut.startsWith("EN_ATTENTE");
+                  const libelleAffiche = d.type_conge_libelle || d.type_conge?.libelle || "Congé";
 
                   return (
                     <tr
@@ -177,7 +181,7 @@ export default function History() {
                       className="transition-colors hover:bg-[#e7ffff]/40"
                     >
                       <td className="px-6 py-4">
-                        <p className="font-bold text-[#3c0038]">{d.type_conge_libelle || d.type_conge?.libelle || "Congé"}</p>
+                        <p className="font-bold text-[#3c0038]">{libelleAffiche}</p>
                         <p className="mt-0.5 font-mono text-[10px] text-slate-400">
                           REF #{d.id}
                         </p>

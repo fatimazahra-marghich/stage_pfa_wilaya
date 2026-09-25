@@ -1,6 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider } from "./context/AuthContext";
-import { SettingsProvider } from "./context/SettingsContext";
+import { LanguageProvider } from "./context/LanguageContext";
 import ProtectedRoute from "./components/ProtectedRoute";
 
 import Login from "./pages/Login";
@@ -40,8 +40,8 @@ import SettingsPage from "./pages/SettingsPage";
 
 export default function App() {
   return (
-    <SettingsProvider>
-      <AuthProvider>
+    <AuthProvider>
+      <LanguageProvider>
         <BrowserRouter>
           <Routes>
             <Route path="/login" element={<Login />} />
@@ -103,7 +103,7 @@ export default function App() {
             <Route path="*" element={<Navigate to="/login" replace />} />
           </Routes>
         </BrowserRouter>
-      </AuthProvider>
-    </SettingsProvider>
+      </LanguageProvider>
+    </AuthProvider>
   );
 }

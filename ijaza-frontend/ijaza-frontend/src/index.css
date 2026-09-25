@@ -5,3 +5,53 @@
 body {
   font-family: "Inter", ui-sans-serif, system-ui, sans-serif;
 }
+/* =========================================================
+   MODE SOMBRE GLOBAL (S'applique automatiquement partout)
+   ========================================================= */
+
+/* 1. Fond et texte global de la page */
+.dark body {
+  background-color: #0f172a !important;
+  color: #f8fafc !important;
+}
+
+/* 2. Transforme automatiquement toutes les cartes / conteneurs blancs en sombre */
+.dark .bg-white {
+  background-color: #1e293b !important;
+  border-color: #334155 !important;
+  color: #f8fafc !important;
+}
+
+/* 3. Ajuste les textes sombres pour qu'ils deviennent lisibles/blancs */
+.dark .text-\[\#3c0038\],
+.dark .text-slate-800,
+.dark .text-slate-700,
+.dark .text-slate-900 {
+  color: #f8fafc !important;
+}
+
+.dark .text-slate-600,
+.dark .text-slate-500 {
+  color: #94a3b8 !important;
+}
+
+/* 4. Transforme tous les champs de saisie (inputs, selects) en sombre */
+.dark input,
+.dark select,
+.dark textarea {
+  background-color: #0f172a !important;
+  border-color: #334155 !important;
+  color: #ffffff !important;
+}
+
+.dark input::placeholder {
+  color: #64748b !important;
+}
+
+/* 5. Ajuste les fonds légers (comme #e7ffff) pour le mode sombre */
+.dark .bg-\[\#e7ffff\],
+.dark .bg-\[\#e7ffff\]\/50,
+.dark .bg-\[\#e7ffff\]\/30 {
+  background-color: #334155/40 !important;
+  border-color: #475569 !important;
+}

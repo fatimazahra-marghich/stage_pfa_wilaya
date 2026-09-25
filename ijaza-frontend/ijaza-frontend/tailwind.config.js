@@ -1,12 +1,12 @@
 /** @type {import('tailwindcss').Config} */
 export default {
-  content: ["./index.html", "./src/**/*.{js,jsx}"],
+  darkMode: 'class', // <--- Ajoutez cette ligne
+  content: [
+    "./index.html",
+    "./src/**/*.{js,ts,jsx,tsx}",
+  ],
   theme: {
-    extend: {
-      colors: {
-        accent: "#E91E8C",
-      },
-    },
+    extend: {},
   },
   plugins: [],
-};
+}

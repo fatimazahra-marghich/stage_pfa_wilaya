@@ -1,32 +1,32 @@
 import { useEffect, useMemo, useState } from "react";
-import {
-  BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
-} from "recharts";
 import api from "../../api/axios";
 import MainLayout from "../../components/MainLayout";
 import { Icone, I } from "../../components/icons";
 
-const MOIS_NOMS = [
-  "Janvier", "Février", "Mars", "Avril", "Mai", "Juin",
-  "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre"
-];
-
-function nomComplet(d) {
-  if (!d) return "Inconnu";
-  const u = d.utilisateur_details || d.utilisateur || {};
-  if (typeof u === "object") {
-    if (u.nom_complet) return u.nom_complet;
-    if (u.first_name || u.last_name) return `${u.first_name || ""} ${u.last_name || ""}`.trim();
-  }
-  return d.utilisateur_nom || `Agent #${d.utilisateur}`;
-}
+const COULEURS_STATUT = {
+  VALIDEE: "bg-emerald-500 hover:bg-emerald-600",
+  VALIDE: "bg-emerald-500 hover:bg-emerald-600",
+  EN_ATTENTE_CHEF: "bg-amber-500 hover:bg-amber-600",
+  EN_ATTENTE_RH: "bg-indigo-500 hover:bg-indigo-600",
+  EN_ATTENTE_SANTE: "bg-purple-500 hover:bg-purple-600",
+  REFUSEE: "bg-rose-500 hover:bg-rose-600",
+  REFUSE: "bg-rose-500 hover:bg-rose-600",
+  DEFAULT: "bg-[#0097ff]",
+};
 
 export default function PlanningPage() {
   const [demandes, setDemandes] = useState([]);
+  const [typesConge, setTypesConge] = useState([]);
+  const [joursFeriesBDD, setJoursFeriesBDD] = useState([]);
   const [chargement, setChargement] = useState(true);
+
+  // Filtres
   const [moisSelectionne, setMoisSelectionne] = useState(
-    new Date().toISOString().slice(0, 7) // Format YYYY-MM
+    new Date().toISOString().slice(0, 7) // YYYY-MM
   );
+  const [rechercheAgent, setRechercheAgent] = useState("");
+  const [typeFiltre, setTypeFiltre] = useState("TOUS");
+  const [statutFiltre, setStatutFiltre] = useState("VALIDEE");
 
   useEffect(() => {
     chargerDonnees();
@@ -35,72 +35,167 @@ export default function PlanningPage() {
   async function chargerDonnees() {
     setChargement(true);
     try {
-      const { data } = await api.get("/demandes/");
-      const liste = data.results ?? data;
-      setDemandes(Array.isArray(liste) ? liste : []);
+      const [{ data: dRes }, { data: tRes }, { data: fRes }] = await Promise.all([
+        api.get("/demandes/"),
+        api.get("/types-conge/").catch(() => ({ data: [] })),
+        api.get("/jours-feries/").catch(() => ({ data: [] })),
+      ]);
+
+      setDemandes(dRes.results ?? dRes ?? []);
+      setTypesConge(tRes.results ?? tRes ?? []);
+      setJoursFeriesBDD(fRes.results ?? fRes ?? []);
     } catch (err) {
-      console.error("Erreur de chargement du planning :", err);
+      console.error("Erreur de chargement des données du planning :", err);
     } finally {
       setChargement(false);
     }
   }
 
-  // Demandes valides pour le planning (exclut les refusées et annulées)
-  const demandesPlanning = useMemo(() => {
-    return demandes.filter(
-      (d) => d.statut !== "REFUSEE_RH" && d.statut !== "REFUSEE_CHEF" && d.statut !== "ANNULEE"
-    );
-  }, [demandes]);
-
-  // Calcul du calendrier
+  // Année, mois et jours du calendrier
   const [annee, mois] = moisSelectionne.split("-").map(Number);
   const nombreJoursDansMois = new Date(annee, mois, 0).getDate();
   const joursDuMois = Array.from({ length: nombreJoursDansMois }, (_, i) => i + 1);
 
-  const estEnConge = (demande, jour) => {
-    const dateJour = new Date(annee, mois - 1, jour);
-    const debut = new Date(demande.date_debut);
-    const fin = new Date(demande.date_fin);
-    return dateJour >= debut && dateJour <= fin;
+  // Vérification Week-end
+  const estWeekEnd = (jour) => {
+    const day = new Date(annee, mois - 1, jour, 12, 0, 0).getDay();
+    return day === 0 || day === 6;
   };
 
-  // --- ANALYTICS & STATISTIQUES ---
-  const parType = useMemo(() => {
-    const compte = {};
-    demandes.forEach((d) => {
-      const lib = d.type_conge_libelle || "Autre";
-      compte[lib] = (compte[lib] ?? 0) + 1;
+  // Vérification Jour Férié en BDD (Ponctuel + Récurrent)
+  const estJourFerie = (jour) => {
+    const moisCourant = mois - 1;
+    const dateCourante = new Date(annee, moisCourant, jour, 12, 0, 0);
+
+    return joursFeriesBDD.some((f) => {
+      const [dYear, dMonth, dDay] = f.date_debut.split("-").map(Number);
+      const [fYear, fMonth, fDay] = f.date_fin.split("-").map(Number);
+
+      // 1. Récurrent
+      if (f.est_recurrent) {
+        const fMoisDebut = dMonth - 1;
+        const fMoisFin = fMonth - 1;
+
+        if (fMoisDebut === fMoisFin) {
+          return moisCourant === fMoisDebut && jour >= dDay && jour <= fDay;
+        }
+
+        const dateCourtMoisJour = (moisCourant + 1) * 100 + jour;
+        const debutMoisJour = dMonth * 100 + dDay;
+        const finMoisJour = fMonth * 100 + fDay;
+
+        return dateCourtMoisJour >= debutMoisJour && dateCourtMoisJour <= finMoisJour;
+      }
+
+      // 2. Ponctuel
+      const debut = new Date(dYear, dMonth - 1, dDay, 0, 0, 0);
+      const fin = new Date(fYear, fMonth - 1, fDay, 23, 59, 59);
+
+      return dateCourante >= debut && dateCourante <= fin;
     });
-    return Object.entries(compte).map(([nom, total]) => ({ nom, total }));
-  }, [demandes]);
-
-  const tauxApprobation = useMemo(() => {
-    const traitees = demandes.filter((d) =>
-      ["VALIDEE", "REFUSEE_RH", "REFUSEE_CHEF"].includes(d.statut)
-    );
-    if (traitees.length === 0) return 0;
-    const validees = traitees.filter((d) => d.statut === "VALIDEE").length;
-    return Math.round((validees / traitees.length) * 100);
-  }, [demandes]);
-
-  // Impression / Exporter PDF
-  const imprimerRapport = () => {
-    window.print();
   };
+
+  // Calcul du statut réel Django
+  const calculerStatutReel = (d) => {
+    const typeCode = (d.type_conge_details?.code || d.type_conge_code || "").toUpperCase();
+    const estMaladie = typeCode === "MALADIE" || d.type_conge_libelle?.toLowerCase().includes("maladie");
+
+    if (estMaladie && Number(d.nombre_jours) <= 4) {
+      return "VALIDEE";
+    }
+    return d.statut || "EN_ATTENTE_CHEF";
+  };
+
+  // Traitement et groupement des agents
+  const agents = useMemo(() => {
+    const parAgent = {};
+
+    const demandesFiltrees = demandes.filter((d) => {
+      if (Number(d.nombre_jours) === 0) return false;
+      if (d.statut === "ANNULEE" || d.statut === "ANNULE") return false;
+
+      const statutReel = calculerStatutReel(d);
+
+      if (statutFiltre === "VALIDEE") {
+        if (statutReel !== "VALIDEE" && statutReel !== "VALIDE") return false;
+      } else if (statutFiltre === "EN_ATTENTE_CHEF") {
+        if (statutReel !== "EN_ATTENTE_CHEF") return false;
+      } else if (statutFiltre === "EN_ATTENTE_RH") {
+        if (statutReel !== "EN_ATTENTE_RH") return false;
+      } else if (statutFiltre === "EN_ATTENTE_TOUT") {
+        if (!["EN_ATTENTE_CHEF", "EN_ATTENTE_RH", "EN_ATTENTE_SANTE", "EN_ATTENTE"].includes(statutReel)) return false;
+      } else if (statutFiltre === "VALIDEES_ET_ATTENTE") {
+        if (["REFUSEE_CHEF", "REFUSEE_RH", "REFUSEE", "REFUSE"].includes(statutReel)) return false;
+      } else if (statutFiltre === "REFUSEE") {
+        if (!["REFUSEE_CHEF", "REFUSEE_RH", "REFUSEE", "REFUSE"].includes(statutReel)) return false;
+      }
+
+      if (typeFiltre !== "TOUS") {
+        const typeId = d.type_conge?.id || d.type_conge;
+        if (String(typeId) !== String(typeFiltre)) return false;
+      }
+
+      return true;
+    });
+
+    demandesFiltrees.forEach((d) => {
+      const key = d.utilisateur;
+      const nomAgent =
+        d.utilisateur_details?.nom_complet ||
+        d.utilisateur_nom ||
+        `Agent #${d.utilisateur}`;
+
+      if (!parAgent[key]) {
+        parAgent[key] = {
+          id: key,
+          nom: nomAgent,
+          periodes: [],
+        };
+      }
+
+      const statutReel = calculerStatutReel(d);
+      let codeCouleur = "VALIDEE";
+      if (statutReel === "EN_ATTENTE_CHEF") codeCouleur = "EN_ATTENTE_CHEF";
+      else if (statutReel === "EN_ATTENTE_RH") codeCouleur = "EN_ATTENTE_RH";
+      else if (statutReel === "EN_ATTENTE_SANTE") codeCouleur = "EN_ATTENTE_SANTE";
+      else if (["REFUSEE_CHEF", "REFUSEE_RH", "REFUSEE", "REFUSE"].includes(statutReel)) codeCouleur = "REFUSEE";
+
+      const [dYear, dMonth, dDay] = d.date_debut.split("-").map(Number);
+      const [fYear, fMonth, fDay] = d.date_fin.split("-").map(Number);
+
+      parAgent[key].periodes.push({
+        id: d.id,
+        debut: new Date(dYear, dMonth - 1, dDay, 0, 0, 0),
+        fin: new Date(fYear, fMonth - 1, fDay, 23, 59, 59),
+        typeLibelle: d.type_conge_libelle || d.type_conge_details?.libelle || "Congé",
+        couleur: COULEURS_STATUT[codeCouleur] || COULEURS_STATUT.DEFAULT,
+        statutAffichage: statutReel,
+      });
+    });
+
+    return Object.values(parAgent);
+  }, [demandes, typeFiltre, statutFiltre]);
+
+  const agentsFiltres = useMemo(() => {
+    return agents.filter((a) =>
+      a.nom.toLowerCase().includes(rechercheAgent.toLowerCase())
+    );
+  }, [agents, rechercheAgent]);
+
+  function getAbsencesJour(agent, jour) {
+    const dateCourante = new Date(annee, mois - 1, jour, 12, 0, 0);
+    return agent.periodes.filter((p) => dateCourante >= p.debut && dateCourante <= p.fin);
+  }
 
   return (
     <MainLayout>
-      <div className="mx-auto max-w-7xl space-y-8">
-        {/* Header */}
-        <header className="flex flex-col gap-4 rounded-2xl border border-[#00efff]/30 bg-white p-6 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+      <div className="mx-auto max-w-7xl space-y-6 p-4">
+        
+        {/* Header Épuré sans "Ressources Humaines" et sans "& Rapports" */}
+        <header className="flex flex-col gap-4 rounded-2xl border border-cyan-100 bg-white p-6 shadow-sm sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-              <span>Ressources Humaines</span>
-              <span>·</span>
-              <span className="text-[#93003f]">Analyse & Organisation</span>
-            </div>
-            <h1 className="mt-1 text-2xl font-bold tracking-tight text-[#3c0038]">
-              Planning des Absences & Rapports
+            <h1 className="text-2xl font-black text-[#3c0038]">
+              Planning des Absences
             </h1>
           </div>
 
@@ -109,152 +204,164 @@ export default function PlanningPage() {
               type="month"
               value={moisSelectionne}
               onChange={(e) => setMoisSelectionne(e.target.value)}
-              className="rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-xs font-bold text-[#3c0038] outline-none focus:border-[#0097ff]"
+              className="rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-xs font-bold text-[#3c0038] outline-none focus:border-cyan-400 shadow-sm"
             />
             <button
-              onClick={imprimerRapport}
-              className="rounded-xl bg-[#3c0038] px-4 py-2 text-xs font-bold text-white transition hover:bg-[#93003f]"
+              onClick={() => window.print()}
+              className="rounded-xl bg-[#3c0038] px-4 py-2 text-xs font-bold text-white transition hover:bg-[#800038]"
             >
               Imprimer / PDF
             </button>
           </div>
         </header>
 
-        {/* CARTES INDICATEURS */}
-        <div className="grid grid-cols-1 gap-5 sm:grid-cols-3">
-          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Total Demandes</p>
-            <p className="mt-2 text-3xl font-black text-[#3c0038]">{demandes.length}</p>
-          </div>
-          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Absences Planifiées (Ce Mois)</p>
-            <p className="mt-2 text-3xl font-black text-[#0097ff]">{demandesPlanning.length}</p>
-          </div>
-          <div className="rounded-2xl bg-gradient-to-br from-[#93003f] to-[#3c0038] p-5 text-white shadow-sm">
-            <p className="text-[11px] font-bold uppercase tracking-wider text-white/70">Taux d'Approbation</p>
-            <p className="mt-2 text-3xl font-black">{tauxApprobation}%</p>
-          </div>
+        {/* Légende Visuelle */}
+        <div className="flex flex-wrap items-center gap-4 rounded-2xl border border-slate-200 bg-white p-4 text-xs font-semibold shadow-sm">
+          <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400">LÉGENDE :</span>
+          <span className="inline-flex items-center gap-1.5 text-slate-700">
+            <span className="h-3 w-3 rounded bg-emerald-500" /> Validées / Auto
+          </span>
+          <span className="inline-flex items-center gap-1.5 text-slate-700">
+            <span className="h-3 w-3 rounded bg-amber-500" /> En attente (Chef)
+          </span>
+          <span className="inline-flex items-center gap-1.5 text-slate-700">
+            <span className="h-3 w-3 rounded bg-indigo-500" /> En attente (RH)
+          </span>
+          <span className="inline-flex items-center gap-1.5 text-slate-700">
+            <span className="h-3 w-3 rounded bg-rose-500" /> Refusées
+          </span>
+          <span className="inline-flex items-center gap-1.5 text-slate-700">
+            <span className="h-3 w-3 rounded bg-slate-200 border border-slate-300" /> Week-end
+          </span>
+          <span className="inline-flex items-center gap-1.5 text-slate-700">
+            <span className="h-3 w-3 rounded bg-amber-200 border border-amber-300" /> Jour Férié
+          </span>
         </div>
 
-        {/* SECTION 1 : CALENDRIER INTERACTIF */}
-        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm space-y-4">
-          <div className="flex items-center justify-between">
-            <h2 className="text-lg font-bold text-[#3c0038]">
-              Planning du mois : {MOIS_NOMS[mois - 1]} {annee}
-            </h2>
-            <div className="flex items-center gap-4 text-xs font-semibold">
-              <span className="flex items-center gap-1.5">
-                <span className="h-3 w-3 rounded-sm bg-[#93003f]"></span> Validé
-              </span>
-              <span className="flex items-center gap-1.5">
-                <span className="h-3 w-3 rounded-sm bg-amber-400"></span> En attente
-              </span>
-            </div>
+        {/* Barre de Filtres */}
+        <div className="grid grid-cols-1 gap-3 rounded-2xl border border-cyan-100 bg-white p-4 shadow-sm sm:grid-cols-3">
+          <div className="relative">
+            <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
+              <Icone d={I.loupe} className="h-4 w-4" />
+            </span>
+            <input
+              type="text"
+              value={rechercheAgent}
+              onChange={(e) => setRechercheAgent(e.target.value)}
+              placeholder="Rechercher un agent..."
+              className="w-full rounded-xl border border-slate-200 py-2 pl-9 pr-4 text-xs outline-none focus:border-cyan-400"
+            />
           </div>
 
-          {chargement ? (
-            <div className="py-12 text-center text-xs text-slate-400">Chargement du planning...</div>
-          ) : (
-            <div className="overflow-x-auto rounded-xl border border-slate-100">
-              <table className="w-full border-collapse text-left text-xs min-w-[750px]">
-                <thead>
-                  <tr className="bg-slate-50 border-b border-slate-200">
-                    <th className="p-3 font-bold text-slate-700 min-w-[180px] sticky left-0 bg-slate-50 z-10">
-                      Employé
-                    </th>
-                    <th className="p-3 font-bold text-slate-700 min-w-[110px]">Type</th>
-                    {joursDuMois.map((j) => (
+          <select
+            value={typeFiltre}
+            onChange={(e) => setTypeFiltre(e.target.value)}
+            className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs font-medium outline-none focus:border-cyan-400"
+          >
+            <option value="TOUS">Tous les types de congés</option>
+            {typesConge.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.libelle}
+              </option>
+            ))}
+          </select>
+
+          <select
+            value={statutFiltre}
+            onChange={(e) => setStatutFiltre(e.target.value)}
+            className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs font-medium outline-none focus:border-cyan-400"
+          >
+            <option value="VALIDEE">Absences validées uniquement</option>
+            <option value="EN_ATTENTE_CHEF">En attente (Chef)</option>
+            <option value="EN_ATTENTE_RH">En attente (RH)</option>
+            <option value="EN_ATTENTE_TOUT">Toutes les demandes en attente</option>
+            <option value="VALIDEES_ET_ATTENTE">Validées + En attente</option>
+            <option value="REFUSEE">Demandes refusées</option>
+            <option value="TOUS">Toutes les demandes</option>
+          </select>
+        </div>
+
+        {/* Grille du Planning */}
+        <div className="overflow-hidden rounded-2xl border border-cyan-200 bg-white shadow-sm">
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse text-left text-xs">
+              <thead>
+                <tr className="border-b border-cyan-100 bg-cyan-50/50">
+                  <th className="sticky left-0 z-10 min-w-[180px] border-r border-cyan-200 bg-cyan-100/60 px-4 py-3 font-bold text-[#3c0038]">
+                    Agent ({agentsFiltres.length})
+                  </th>
+                  {joursDuMois.map((j) => {
+                    const weekend = estWeekEnd(j);
+                    const ferie = estJourFerie(j);
+                    return (
                       <th
                         key={j}
-                        className="p-1.5 text-center border-l border-slate-200 w-7 font-bold text-slate-500"
+                        className={`min-w-[34px] border-r border-cyan-100 px-1 py-2 text-center font-bold ${
+                          ferie
+                            ? "bg-amber-200/80 text-amber-900"
+                            : weekend
+                            ? "bg-slate-200/60 text-slate-600"
+                            : "text-slate-700"
+                        }`}
                       >
                         {j}
                       </th>
-                    ))}
+                    );
+                  })}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-cyan-50">
+                {chargement ? (
+                  <tr>
+                    <td colSpan={nombreJoursDansMois + 1} className="py-12 text-center text-slate-400 font-medium">
+                      Chargement du planning...
+                    </td>
                   </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {demandesPlanning.length === 0 ? (
-                    <tr>
-                      <td colSpan={joursDuMois.length + 2} className="p-8 text-center text-slate-400">
-                        Aucun congé prévu sur cette période.
+                ) : agentsFiltres.length === 0 ? (
+                  <tr>
+                    <td colSpan={nombreJoursDansMois + 1} className="py-12 text-center text-slate-400 font-medium">
+                      Aucune donnée à afficher pour ce mois selon les filtres.
+                    </td>
+                  </tr>
+                ) : (
+                  agentsFiltres.map((agent) => (
+                    <tr key={agent.id} className="hover:bg-slate-50/50 transition">
+                      <td className="sticky left-0 z-10 truncate border-r border-cyan-200 bg-white px-4 py-3.5 font-bold text-[#3c0038]">
+                        {agent.nom}
                       </td>
+                      {joursDuMois.map((j) => {
+                        const absences = getAbsencesJour(agent, j);
+                        const weekend = estWeekEnd(j);
+                        const ferie = estJourFerie(j);
+                        return (
+                          <td
+                            key={j}
+                            className={`border-r border-cyan-50 p-0.5 text-center transition ${
+                              ferie
+                                ? "bg-amber-100/40"
+                                : weekend
+                                ? "bg-slate-100/70"
+                                : ""
+                            }`}
+                          >
+                            {absences.map((abs, index) => (
+                              <div
+                                key={index}
+                                className={`h-5 w-full rounded-md ${abs.couleur} shadow-xs transition-transform hover:scale-105 cursor-pointer`}
+                                title={`${agent.nom} - ${abs.typeLibelle} (${abs.statutAffichage})`}
+                              />
+                            ))}
+                          </td>
+                        );
+                      })}
                     </tr>
-                  ) : (
-                    demandesPlanning.map((d) => (
-                      <tr key={d.id} className="hover:bg-slate-50/50">
-                        <td className="p-3 font-bold text-[#3c0038] sticky left-0 bg-white z-10 border-r border-slate-100">
-                          {nomComplet(d)}
-                        </td>
-                        <td className="p-3 text-slate-500 font-medium">
-                          {d.type_conge_libelle || "Congé"}
-                        </td>
-                        {joursDuMois.map((j) => {
-                          const enConge = estEnConge(d, j);
-                          const estValide = d.statut === "VALIDEE";
-
-                          return (
-                            <td
-                              key={j}
-                              className={`p-1 text-center border-l border-slate-100 text-[10px] ${
-                                enConge
-                                  ? estValide
-                                    ? "bg-[#93003f] text-white font-bold"
-                                    : "bg-amber-300 text-amber-900 font-bold"
-                                  : ""
-                              }`}
-                              title={enConge ? `${nomComplet(d)} (${d.statut})` : ""}
-                            >
-                              {enConge ? "•" : ""}
-                            </td>
-                          );
-                        })}
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </section>
-
-        {/* SECTION 2 : GRAPHIQUES ET STATISTIQUES */}
-        <section className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-          {/* Répartition par Type */}
-          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            <h3 className="font-bold text-[#3c0038] mb-4">Répartition des Demandes par Type</h3>
-            <div className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={parType}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                  <XAxis dataKey="nom" tick={{ fontSize: 11 }} />
-                  <YAxis tick={{ fontSize: 11 }} />
-                  <Tooltip />
-                  <Bar dataKey="total" fill="#3c0038" radius={[6, 6, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
+                  ))
+                )}
+              </tbody>
+            </table>
           </div>
+        </div>
 
-          {/* Synthèse par statut */}
-          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm space-y-4">
-            <h3 className="font-bold text-[#3c0038]">Résumé Statut des Demandes</h3>
-            <div className="space-y-3 text-xs font-semibold">
-              <div className="flex justify-between items-center p-3 rounded-xl bg-emerald-50 text-emerald-800">
-                <span>Congés Validés RH</span>
-                <span className="font-bold">{demandes.filter(d => d.statut === "VALIDEE").length}</span>
-              </div>
-              <div className="flex justify-between items-center p-3 rounded-xl bg-amber-50 text-amber-800">
-                <span>En attente de validation</span>
-                <span className="font-bold">{demandes.filter(d => d.statut.includes("ATTENTE")).length}</span>
-              </div>
-              <div className="flex justify-between items-center p-3 rounded-xl bg-rose-50 text-rose-800">
-                <span>Demandes Refusées</span>
-                <span className="font-bold">{demandes.filter(d => d.statut.includes("REFUSEE")).length}</span>
-              </div>
-            </div>
-          </div>
-        </section>
       </div>
     </MainLayout>
   );

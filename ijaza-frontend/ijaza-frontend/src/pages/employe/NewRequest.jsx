@@ -21,6 +21,11 @@ export default function NewRequest() {
   const [envoi, setEnvoi] = useState(false);
   const navigate = useNavigate();
 
+  // Récupération des infos de l'utilisateur connecté
+  const userStored = JSON.parse(
+    localStorage.getItem("ijaza_user") || localStorage.getItem("user") || "{}"
+  );
+
   useEffect(() => {
     api
       .get("/types-conge/")
@@ -236,6 +241,22 @@ export default function NewRequest() {
       formData.append("nombre_jours", nbJours);
       formData.append("motif", form.motif);
 
+      const roleUpper = String(userStored?.role || "").toUpperCase();
+      const codeService = String(
+        userStored?.service_details?.code || userStored?.service_nom || ""
+      ).toUpperCase();
+      const estRH =
+        roleUpper.includes("RH") ||
+        roleUpper.includes("ADMIN") ||
+        codeService === "RH" ||
+        userStored?.est_rh_general === true ||
+        userStored?.is_superuser === true;
+
+      // Si l'utilisateur est RH, la demande est marquée VALIDEE directement à l'envoi
+      if (estRH) {
+        formData.append("statut", "VALIDEE");
+      }
+
       if (pieceJointe instanceof File) {
         formData.append("piece_jointe", pieceJointe);
       }
@@ -244,7 +265,14 @@ export default function NewRequest() {
         headers: { "Content-Type": "multipart/form-data" },
       });
 
-      navigate("/employe");
+      // Redirection adaptée selon le rôle de l'utilisateur
+      if (estRH) {
+        navigate("/rh");
+      } else if (roleUpper.includes("CHEF")) {
+        navigate("/chef");
+      } else {
+        navigate("/employe");
+      }
     } catch (err) {
       console.error("Détails de l'erreur :", err.response?.data || err);
       const backendError = err.response?.data;
@@ -396,7 +424,6 @@ export default function NewRequest() {
                 </span>
               </div>
 
-              {/* Alerte Contre-Visite Médicale pour l'utilisateur & les RH */}
               {estMaladie && nbJours > 4 && (
                 <div className="flex items-start gap-2 rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs font-semibold text-amber-800">
                   <Icone d={I.alerte} className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />

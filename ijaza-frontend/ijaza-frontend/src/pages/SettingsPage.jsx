@@ -1,5 +1,5 @@
-import React, { useState } from "react";
-import MainLayout from "../components/MainLayout"; // Ajustez le chemin selon l'emplacement de MainLayout
+import React, { useState, useEffect } from "react";
+import MainLayout from "../components/MainLayout";
 
 // Icônes SVG
 const Icone = ({ d, className = "h-5 w-5" }) => (
@@ -18,23 +18,55 @@ const Icone = ({ d, className = "h-5 w-5" }) => (
 );
 
 const I = {
-  soleil: "M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z",
+  soleil:
+    "M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z",
   lune: "M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z",
-  langue: "M3 5h12M9 3v2m1 4h.01M4 9h12M5 9c0 5.5 3.8 10 9 11m-4-6c1.5 2 3.5 3.5 6 4.5M19 11l-4 10m0 0l-1.5-3.5M15 21l4.5-3.5",
-  cloche: "M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 01-3.46 0",
-  sauvegarder: "M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2zM17 21v-8H7v8M7 3v5h8",
+  langue:
+    "M3 5h12M9 3v2m1 4h.01M4 9h12M5 9c0 5.5 3.8 10 9 11m-4-6c1.5 2 3.5 3.5 6 4.5M19 11l-4 10m0 0l-1.5-3.5M15 21l4.5-3.5",
+  cloche:
+    "M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 01-3.46 0",
+  sauvegarder:
+    "M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2zM17 21v-8H7v8M7 3v5h8",
   check: "M20 6L9 17l-5-5",
 };
 
 export default function SettingsPage() {
-  const [themeMode, setThemeMode] = useState("clair");
-  const [langue, setLangue] = useState("fr");
-  const [notificationsEmail, setNotificationsEmail] = useState(true);
-  const [notifDemandes, setNotifDemandes] = useState(true);
+  // Chargement des préférences enregistrées dans le localStorage ou valeurs par défaut
+  const [themeMode, setThemeMode] = useState(
+    () => localStorage.getItem("app_theme") || "clair"
+  );
+  const [langue, setLangue] = useState(
+    () => localStorage.getItem("app_langue") || "fr"
+  );
+  const [notificationsEmail, setNotificationsEmail] = useState(() => {
+    const saved = localStorage.getItem("app_notif_email");
+    return saved !== null ? JSON.parse(saved) : true;
+  });
+  const [notifDemandes, setNotifDemandes] = useState(() => {
+    const saved = localStorage.getItem("app_notif_demandes");
+    return saved !== null ? JSON.parse(saved) : true;
+  });
+
   const [enregistre, setEnregistre] = useState(false);
 
+  // Application dynamique du thème dans le document HTML
+  useEffect(() => {
+    if (themeMode === "sombre") {
+      document.documentElement.classList.add("dark");
+    } else {
+      document.documentElement.classList.remove("dark");
+    }
+  }, [themeMode]);
+
+  // Sauvegarde des préférences dans localStorage
   const handleSave = (e) => {
     e.preventDefault();
+
+    localStorage.setItem("app_theme", themeMode);
+    localStorage.setItem("app_langue", langue);
+    localStorage.setItem("app_notif_email", JSON.stringify(notificationsEmail));
+    localStorage.setItem("app_notif_demandes", JSON.stringify(notifDemandes));
+
     setEnregistre(true);
     setTimeout(() => setEnregistre(false), 3000);
   };
@@ -42,7 +74,7 @@ export default function SettingsPage() {
   return (
     <MainLayout>
       {/* En-tête de la page */}
-      <div className="mx-auto max-w-4xl space-y-2">
+      <div className="mx-auto max-w-4xl space-y-2 select-none">
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold tracking-tight text-[#3c0038] lg:text-3xl">
@@ -59,7 +91,7 @@ export default function SettingsPage() {
       </div>
 
       {/* Formulaire des paramètres */}
-      <form onSubmit={handleSave} className="mx-auto mt-8 max-w-4xl space-y-6">
+      <form onSubmit={handleSave} className="mx-auto mt-8 max-w-4xl space-y-6 select-none">
         
         {/* Notification de sauvegarde réussie */}
         {enregistre && (
@@ -70,7 +102,7 @@ export default function SettingsPage() {
             <div>
               <p className="text-sm font-semibold">Modifications enregistrées !</p>
               <p className="text-xs text-emerald-600">
-                Vos préférences d'affichage et de notification ont été mises à jour.
+                Vos préférences d'affichage et de notification ont été sauvegardées.
               </p>
             </div>
           </div>
@@ -93,7 +125,7 @@ export default function SettingsPage() {
             <button
               type="button"
               onClick={() => setThemeMode("clair")}
-              className={`group flex items-center justify-between rounded-xl border p-4 text-left transition-all ${
+              className={`group flex items-center justify-between rounded-xl border p-4 text-left transition-all cursor-pointer ${
                 themeMode === "clair"
                   ? "border-[#0097ff] bg-[#e7ffff]/30 ring-2 ring-[#0097ff]/20"
                   : "border-slate-200 hover:border-slate-300 hover:bg-slate-50/80"
@@ -115,7 +147,7 @@ export default function SettingsPage() {
             <button
               type="button"
               onClick={() => setThemeMode("sombre")}
-              className={`group flex items-center justify-between rounded-xl border p-4 text-left transition-all ${
+              className={`group flex items-center justify-between rounded-xl border p-4 text-left transition-all cursor-pointer ${
                 themeMode === "sombre"
                   ? "border-[#3c0038] bg-[#3c0038]/5 ring-2 ring-[#3c0038]/20"
                   : "border-slate-200 hover:border-slate-300 hover:bg-slate-50/80"
@@ -155,12 +187,11 @@ export default function SettingsPage() {
               <p className="text-xs text-slate-400">Toute l'application s'affichera dans cette langue.</p>
             </div>
             
-            {/* Sélecteur de langue */}
             <select
               id="langue-select"
               value={langue}
               onChange={(e) => setLangue(e.target.value)}
-              className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 transition-colors focus:border-[#0097ff] focus:outline-none focus:ring-2 focus:ring-[#0097ff]/20 sm:w-64"
+              className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 transition-colors focus:border-[#0097ff] focus:outline-none focus:ring-2 focus:ring-[#0097ff]/20 sm:w-64 cursor-pointer"
             >
               <option value="fr">🇫🇷 Français (Par défaut)</option>
               <option value="ar">🇲🇦 العربية (Arabe)</option>
@@ -230,7 +261,7 @@ export default function SettingsPage() {
         <div className="flex justify-end pt-2">
           <button
             type="submit"
-            className="flex items-center gap-2 rounded-xl bg-[#93003f] px-6 py-3 text-sm font-semibold text-white shadow-md transition-all hover:bg-[#3c0038] hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-[#93003f]/50 active:scale-[0.98]"
+            className="flex items-center gap-2 rounded-xl bg-[#93003f] px-6 py-3 text-sm font-semibold text-white shadow-md transition-all hover:bg-[#3c0038] hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-[#93003f]/50 active:scale-[0.98] cursor-pointer"
           >
             <Icone d={I.sauvegarder} className="h-4 w-4" />
             Enregistrer les préférences

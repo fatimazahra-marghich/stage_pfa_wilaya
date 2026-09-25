@@ -1,15 +1,27 @@
 from rest_framework import serializers
 from .models import Division, Service
 
+# 1. Serializer pour afficher les informations de la division
+class DivisionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Division
+        fields = ['id', 'nom', 'code']
+
 
 class ServiceSerializer(serializers.ModelSerializer):
     division_nom = serializers.ReadOnlyField(source='division.nom')
+    division_id = serializers.ReadOnlyField(source='division.id')
+    division_details = DivisionSerializer(source='division', read_only=True)
+    
     chef_nom = serializers.SerializerMethodField()
     nombre_agents = serializers.SerializerMethodField()
 
     class Meta:
         model = Service
-        fields = ['id', 'nom', 'code', 'division', 'division_nom', 'chef', 'chef_nom', 'nombre_agents']
+        fields = [
+            'id', 'nom', 'code', 'division', 'division_id', 
+            'division_nom', 'division_details', 'chef', 'chef_nom', 'nombre_agents'
+        ]
 
     def get_chef_nom(self, obj):
         if obj.chef:
@@ -21,6 +33,8 @@ class ServiceSerializer(serializers.ModelSerializer):
         # Compte le nombre d'utilisateurs liés à ce service
         if hasattr(obj, 'agents'):
             return obj.agents.count()
+        elif hasattr(obj, 'utilisateur_set'):
+            return obj.utilisateur_set.count()
         return 0
 
 

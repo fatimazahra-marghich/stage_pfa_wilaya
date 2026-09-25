@@ -6,7 +6,7 @@ from django.contrib.auth import authenticate, get_user_model
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from .models import Utilisateur
-from .serializers import UtilisateurSerializer
+from .serializers import UtilisateurSerializer, ChangePasswordSerializer
 
 User = get_user_model()
 
@@ -44,10 +44,40 @@ class UtilisateurViewSet(viewsets.ModelViewSet):
 
         return queryset.filter(id=user.id)
 
-    @action(detail=False, methods=['get'], permission_classes=[permissions.IsAuthenticated])
+    @action(detail=False, methods=['get', 'patch', 'put'], permission_classes=[permissions.IsAuthenticated])
     def me(self, request):
-        serializer = self.get_serializer(request.user)
-        return Response(serializer.data)
+        """
+        GET  /api/users/me/   -> Récupère le profil connecté.
+        PATCH /api/users/me/  -> Met à jour le profil connecté (Prénom, Nom).
+        """
+        user = request.user
+        if request.method in ['PATCH', 'PUT']:
+            serializer = self.get_serializer(user, data=request.data, partial=True)
+            serializer.is_valid(raise_exception=True)
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_200_OK)
+
+        serializer = self.get_serializer(user)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['post'], url_path='changer-mot-de-passe', permission_classes=[permissions.IsAuthenticated])
+    def changer_mot_de_passe(self, request):
+        """
+        POST /api/users/changer-mot-de-passe/ -> Permet le changement de mot de passe.
+        """
+        serializer = ChangePasswordSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        user = request.user
+        if not user.check_password(serializer.validated_data['old_password']):
+            return Response(
+                {'detail': 'L\'ancien mot de passe est incorrect.'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        user.set_password(serializer.validated_data['new_password'])
+        user.save()
+        return Response({'detail': 'Mot de passe modifié avec succès.'}, status=status.HTTP_200_OK)
 
 
 class LoginView(APIView):
